@@ -39,7 +39,7 @@ test('package and native plugin release versions stay aligned', () => {
   const pkg = JSON.parse(read('../package.json'));
   const plugin = JSON.parse(read('../plugin.json'));
   assert.equal(plugin.version, pkg.version);
-  assert.match(pkg.version, /^\\d+\\.\\d+\\.\\d+$/);
+  assert.match(pkg.version, /^[0-9]+[.][0-9]+[.][0-9]+$/);
   for (const path of ['../README.md', '../docs/setup.md']) {
     assert.ok(read(path).includes('@matuto-ai/antigravity-broker-connector@' + pkg.version), path + ' must document the prepared version');
   }
