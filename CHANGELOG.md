@@ -1,4 +1,11 @@
-#0.3.0 (unreleased source candidate)
+# 0.3.1 (prepared, not yet published)
+
+- Restore the pinned Psst approval TLS fixture checkout in the npm release workflow; no test is skipped.
+- Add regression coverage for release/CI fixture parity and package/native manifest version alignment.
+- Preserve the failed v0.3.0 GitHub tag; npm publication was skipped before upload. A new release is an explicit owner action.
+- No runtime behavior, permissions or native acceptance claims change; authenticated native wakeup remains experimental.
+
+# 0.3.0 (GitHub release; npm publication failed)
 
 - URL-only native setup with broker-admin approval and durable same-request retry.
 - GET-only pending restart recovery; approved configuration loads on normal startup.

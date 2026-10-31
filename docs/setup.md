@@ -12,7 +12,7 @@ One-time package bootstrap, **after this version is released**:
 
 ```sh
 npm install --prefix "$HOME/.local/share/psst-antigravity" --ignore-scripts \
-  @matuto-ai/antigravity-broker-connector@0.3.0
+  @matuto-ai/antigravity-broker-connector@0.3.1
 ```
 
 Then use the native `/plugin install` command with the absolute installed folder
