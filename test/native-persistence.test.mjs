@@ -12,6 +12,6 @@ test('30 independent native conversation journals share authorization, preserve 
  const sent=await broker.request('/v1/messages',{method:'POST',session:sender.client_id,key:randomUUID(),body:sendBody(sessions[0].identity.client_id,'durable original conversation data')});assert.equal(sent.status,202);
  let received;for(let i=0;i<100;i++){received=await sessions[0].tools.broker_receive({});if(received.message)break;await delay(20);}assert.equal(received.message_id,sent.body.message_id);
  for(const s of sessions.slice(1))assert.equal((await s.tools.broker_receive({})).message,null);
- const identity=sessions[0].identity;await sessions[0].close();sessions[0]=await startNativeSession({config,conversationId:ids[0],isAlive:()=>true});assert.deepEqual(sessions[0].identity,identity);assert.equal((await sessions[0].tools.broker_receive({})).receipt_token,received.receipt_token);
+ const identity=sessions[0].identity;await sessions[0].close();sessions[0]=await startNativeSession({config,conversationId:ids[0],isAlive:()=>true});assert.deepEqual(sessions[0].identity,identity);assert.equal((await sessions[0].tools.broker_receive({})).message_id,received.message_id);
  const alternate={...config,enrollment:{credentialId:'enrolled-'+randomUUID(),expiresAt:new Date(Date.now()+60000).toISOString()}};const replacement=await startNativeSession({config:alternate,conversationId:ids[0],isAlive:()=>true});sessions.push(replacement);assert.notEqual(replacement.identity.client_id,identity.client_id);assert.equal((await replacement.tools.broker_receive({})).message,null);
 });

@@ -1,5 +1,7 @@
 # Explicit installation pairing
 
+> Legacy diagnostic/test reference only. Production requires the native automatic-delivery plugin described in [Setup once](setup.md). Do not configure manual pull as a production fallback. In the unreleased 0.4.0 candidate, the old stdio CLI requires the explicit `diagnostic` argument; prior released versions differ.
+
 This additive command prepares a credential bundle. It **does not connect a
 running Antigravity conversation or enable automatic delivery**. Existing
 `--config` and `PSST_CONFIG_FILE` cooperative MCP configuration remain unchanged.

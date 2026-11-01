@@ -16,5 +16,5 @@ export async function pairConnector(options, dependencies = {}) {
   readConnectorConfig(result.connectionFile, {});
   const receipt = readEnrollmentReceipt({ connectionFile: result.connectionFile, clientType: 'antigravity-cli' });
   if (receipt.credentialId !== result.credentialId || receipt.expiresAt !== result.expiresAt) throw new Error('invalid_enrollment_receipt');
-  return { ...result, connected: false, next_step: 'Configure the cooperative MCP server with connectionFile. Native automatic delivery remains gated.' };
+  return { ...result, connected: false, next_step: 'Pairing saved authorization only. Production requires the native automatic-delivery plugin; legacy stdio is diagnostic/test-only. No native conversation was connected.' };
 }

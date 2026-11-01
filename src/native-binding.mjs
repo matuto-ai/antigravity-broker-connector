@@ -8,7 +8,7 @@ import { canonical, validateUuid } from '../vendor/psst/src/protocol.mjs';
 const fail = () => { throw new Error('native_binding_rejected'); };
 const equal = (a,b) => canonical(a) === canonical(b);
 const digest = args => createHash('sha256').update(canonical(args)).digest('hex');
-const tools = new Set(['broker_setup','broker_setup_status','broker_cancel_setup','broker_wait_approval','broker_connect','broker_disconnect','broker_wait','broker_identity','broker_list_clients','broker_send','broker_receive','broker_acknowledge','broker_message_status','broker_update_metadata']);
+const tools = new Set(['broker_setup','broker_setup_status','broker_cancel_setup','broker_wait_approval','broker_connect','broker_disconnect','broker_wait','broker_identity','broker_list_clients','broker_send','broker_receive','broker_acknowledge','broker_message_status','broker_update_metadata','broker_sent_history','broker_message_content','broker_resend','broker_cancel']);
 
 /** Only the native launcher/hook calls this; no model arguments choose a PID. */
 export function processIdentity(pid) {

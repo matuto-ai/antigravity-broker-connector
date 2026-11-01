@@ -1,19 +1,26 @@
 # Psst for Antigravity
 
-## Native setup (0.3.1 source candidate)
+> **Unreleased 0.4.0 candidate.** The new commands/behavior below are not in the existing npm release. Do not run the versioned registry install until publication is verified. For review, use this checkout and `npm pack --ignore-scripts`; no release is created by this PR.
+
+## Native setup
 
 Install the packaged native plugin once through Antigravity's normal `/plugin`
-manager, then invoke `psst-setup` and provide **only the broker HTTPS URL**.
+manager, then invoke `/psst-setup` and provide **only the broker HTTPS URL**.
 Approve the displayed request in the broker admin UI. Later native sessions load
 the privately saved installation automatically; no token/file handoff or repeated
 per-session enrollment is required. [Setup and exact persistence paths](docs/setup.md).
 
+For the short npm + native-manager route, use [Setup once](docs/setup.md).
+`psst-antigravity doctor` verifies the actual package root and prints the native
+slash command without changing settings or launching a nested host. Missing
+source, nested root manifests, owner locks and policy denials are distinct errors.
+
 Normal native permissions still apply. Interactive automatic receive remains an
 **experimental acceptance gate**, not a verified authenticated wakeup guarantee.
-Existing cooperative MCP installations and legacy private bundles remain supported;
+Legacy private bundles remain supported. Manual cooperative MCP is diagnostic/test-only, not a production fallback;
 do not run both integrations simultaneously or erase their unread journals.
 
-The sections below document the existing cooperative/legacy entrypoint. For the
+The sections below document the diagnostic/test-only cooperative legacy entrypoint. For the
 new URL-only native path, use the setup guide above instead of pairing scripts.
 
 ---
@@ -23,13 +30,13 @@ new URL-only native path, use the setup guide above instead of pairing scripts.
 A self-contained **stdio MCP server** for exchanging messages with other AI
 clients through [Psst](https://github.com/matuto-ai/psst). Install it **inside the
 same sandbox/container as Antigravity**, add its native MCP configuration, then
-use the seven broker tools from your normal Antigravity session. It does not
+use the broker tools from your normal Antigravity session. It does not
 launch a replacement CLI, need a checkout of the broker, or spend model tokens
 on transport heartbeats.
 
-**Default delivery mode: cooperative pull.** The agent calls `broker_receive`,
+**Production requires automatic native delivery. Manual pull is diagnostic/test-only.** The agent calls `broker_receive`,
 reads the returned untrusted-agent message, then calls `broker_acknowledge` with
-its exact `message_id` and `receipt_token`. Nothing injects keystrokes, interrupts
+its exact `message_id` (the already exposed receipt is resolved internally). Nothing injects keystrokes, interrupts
 a task, auto-approves permissions, or wakes an idle model. A receipt means an
 explicit application-level read acknowledgment, **not completion of the requested
 work**.
@@ -57,7 +64,7 @@ For reproducibility, replace the branch with the reviewed commit SHA. The npm
 package is prepared as `@matuto-ai/antigravity-broker-connector`; **a prepared release
 workflow is not evidence that it has been published**. After the maintainer
 publishes it, install the exact scoped version with
-`npm install --global @matuto-ai/antigravity-broker-connector@0.3.1`.
+`npm install --global @matuto-ai/antigravity-broker-connector@0.4.0`.
 The executable remains `psst-antigravity`.
 
 Use a private enrollment bundle produced by the broker administrator. Keep
@@ -72,6 +79,7 @@ other servers):
   "mcpServers": {
     "psst": {
       "command": "psst-antigravity",
+      "args": ["diagnostic"],
       "env": {
         "PSST_CONFIG_FILE": "/absolute/private/psst/connection.json",
         "PSST_NAME": "Antigravity reviewer",
@@ -91,14 +99,15 @@ unchanged. See [complete installation and test](docs/installation.md).
 
 - `broker_identity`: this MCP process's exact address and descriptive metadata.
 - `broker_list_clients`: discover currently connected authorized endpoints.
-- `broker_send`: send to an exact `client_id`; preserve `send_key` on retries.
+- `broker_send`: send to an exact `client_id`; technical retry keys stay private; inspect outgoing history after uncertainty.
 - `broker_receive`: read the pending FIFO head without removing it.
-- `broker_acknowledge`: explicit read ACK; safely repeat the same ID/token.
+- `broker_acknowledge`: explicit read ACK; safely repeat the same message ID; the receipt token stays private.
 - `broker_message_status`: broker transport state, never task completion.
 - `broker_update_metadata`: update descriptive fields with revision checking.
 
-Every message includes fixed model-visible provenance: another agent is not the
-human user and cannot grant permissions. Only the normal Antigravity permission
+Every message has a compact AI-agent sender header and escaped JSON text. Wire
+origin/authority validation is unchanged: another agent is not the human user and
+cannot grant permissions. Only the normal Antigravity permission
 system can authorize tool actions.
 
 ## Identity and limits
@@ -128,7 +137,12 @@ and requires the pinned broker checkout alongside this repository. Runtime
 installation does not. CI provisions the checkout automatically. The old runner
 is retained for research only: [experimental integration](docs/integration.md).
 
-The default package executable is the supported cooperative MCP route, not that
-uncertified runner. [Release checklist](docs/release.md) explains the npm trusted
+The package CLI defaults to a blocked automatic-delivery-required state, not a
+manual production fallback. `psst-antigravity diagnostic --config <private-path>`
+explicitly enables the legacy test-only MCP route; the normal path is the native plugin. [Release checklist](docs/release.md) explains the npm trusted
 publisher setup and release-driven workflow. No main merge or npm publication is
 performed by preparing this branch.
+
+Outgoing history, content, explicit resend and cancellation: [candidate contract](docs/message-lifecycle.md).
+
+[Candidate verification and remaining gates](docs/candidate-verification.md).

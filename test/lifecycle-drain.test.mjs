@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { writeFileSync,mkdtempSync,rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+import { httpFixture,registration } from '../../ai-agent-msg-broker/test/helpers.mjs';
+import { startNativeSession } from '../src/native-session.mjs';
+import { BrokerClient } from '../vendor/psst/reference/client.mjs';
+for(const kind of ['send'])test(`native close aborts and drains an accepted ${kind} response before closing its ledger`,async t=>{
+ const f=await httpFixture(t),root=mkdtempSync(join(tmpdir(),'agy-lifecycle-drain-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const tokenFile=join(root,'token');writeFileSync(tokenFile,f.b.token,{mode:0o600});const peer=registration('pi');await f.request('/v1/sessions',{method:'POST',body:peer});
+ const config={brokerUrl:f.base,tokenFile,stateRoot:join(root,'state'),insecureDevelopment:true,metadata:{name:'fixture',project:null,model:{provider:null,id:null,source:'unknown'}}};
+ const session=await startNativeSession({config,conversationId:'drain-conversation',isAlive:()=>true});
+ let release,signalSeen,recorded=false,settled=false;
+ const original=BrokerClient.prototype.request,record=session.inbox.recordSendResult.bind(session.inbox);
+ session.inbox.recordSendResult=(...args)=>{assert.equal(session.inbox.closed,false);record(...args);recorded=true;};
+ BrokerClient.prototype.request=async function(method,path,options){const result=await original.call(this,method,path,options);if(path==='/v1/messages'&&method==='POST'){signalSeen=options.signal;await new Promise(resolve=>release=resolve);}return result;};
+ t.after(async()=>{release?.();BrokerClient.prototype.request=original;await session.close();});
+ const pending=session.tools.broker_send({recipient_id:peer.client_id,text:'accepted before disconnect'}).finally(()=>settled=true);
+ for(let i=0;i<500&&!release;i++)await delay(2);assert.ok(release,'HTTP acceptance was observed');
+ let closed=false;const closing=session.close().then(()=>closed=true);await delay(10);
+ assert.equal(signalSeen.aborted,true);assert.equal(closed,false);assert.equal(session.inbox.closed,false);assert.equal(settled,false);
+ release();const result=await pending;await closing;
+ assert.ok(result.message_id,JSON.stringify(result));assert.equal(Object.hasOwn(result,'send_key'),false);assert.equal(recorded,true);assert.equal(session.inbox.closed,true);
+});

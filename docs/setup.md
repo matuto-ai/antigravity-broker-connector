@@ -5,23 +5,46 @@ Its directory now includes `plugin.json`, hooks, MCP configuration and skills;
 no generated pairing file or per-window operator script is the primary path.
 Node 24.19+ within major 24 must already be available inside the same sandbox. Do not run
 the old cooperative MCP configuration alongside the native plugin: each would
-otherwise own a separate address. Existing cooperative installations continue to
-work unchanged; switching integrations does not erase their unread journals.
+otherwise own a separate address. Legacy cooperative integrations are diagnostic/test-only, not a production fallback; switching integrations does not erase their unread journals.
 
-One-time package bootstrap, **after this version is released**:
+After publication of **0.4.0 is verified** (this is currently an unreleased candidate), one-time package bootstrap:
 
 ```sh
 npm install --prefix "$HOME/.local/share/psst-antigravity" --ignore-scripts \
-  @matuto-ai/antigravity-broker-connector@0.3.1
+  @matuto-ai/antigravity-broker-connector@0.4.0
+"$HOME/.local/share/psst-antigravity/node_modules/.bin/psst-antigravity" doctor
 ```
 
-Then use the native `/plugin install` command with the absolute installed folder
-`$HOME/.local/share/psst-antigravity/node_modules/@matuto-ai/antigravity-broker-connector`
-(expand HOME to its real path). A preinstalled sandbox does this once in bootstrap,
-not for each session. The official native manager copies the package's plugin
-files into its managed plugin directory. No global Node change is required.
+The doctor prints a verified absolute package root and the exact native
+`/plugin install` command. Paste that command **directly into the current
+Antigravity TUI**, not into `!`. The npm/doctor commands can run through the
+in-session `!` shell; no separate terminal or nested interactive host is needed.
+Do not invoke `agy plugin install` from inside an already active `agy` session.
+A missing `antigravity` executable does not imply the in-session manager is missing.
+The doctor does not invoke either launcher or modify native registration.
 
-1. In Antigravity invoke `psst-setup`; provide only the HTTPS broker URL.
+It verifies source existence, a root-level `plugin.json`, required package files,
+aligned version, runtime range and bundled reference bytes. It is not a native
+permission or connection test. An echoed pathname is not existence evidence.
+`psst-antigravity doctor /absolute/package/root` can inspect an explicit source;
+a directory containing a nested connector folder is not the plugin root.
+Scoped npm paths containing `@` are supported by the observed live install; an
+earlier parser error followed by success on the same path does not prove a
+universal parser defect. Do not create aliases or copy source to work around it.
+
+If the source is missing, locate the package in the **same** running environment
+before retrying. If the native manager denies import or reports an active-owner
+lock, stop and report that exact condition. An owner lock is not proof of an
+import-policy denial. Do not delete locks, switch identity/binary, or change
+policy to force installation. Use the existing native UI; administrator review
+is needed for a genuine policy restriction.
+
+A preinstalled sandbox manages this once in bootstrap, not once per session. The
+native manager copies plugin files into its managed directory. For updates, keep
+the npm prefix and use the native manager's normal update/install action; do not
+overwrite its managed copy. Verify exact version after restart before setup.
+
+1. In Antigravity invoke `/psst-setup`; provide only the HTTPS broker URL.
 2. The administrator approves the displayed request ID in the broker's login-form
    UI. There is no token/password to paste into the conversation.
 3. The plugin saves approved installation selection privately. Later native
@@ -67,9 +90,11 @@ therefore persistent per project/identity in that archived layout. To share one
 Psst installation across projects, bootstrap can mount only a dedicated private
 `$CONFIG_DIR/psst/antigravity/installation` at `/home/node/.config/psst-installation`
 and set `PSST_ANTIGRAVITY_INSTALLATION_DIR` to that path. Do NOT share entire
-`.gemini` conversation databases or the provider keyring. The archived native
-policy rejects plugin/MCP imports; enabling this plugin needs a separately
-reviewed bootstrap exception, never an adapter bypass. No bootstrap file was
+`.gemini` conversation databases or the provider keyring. That archived native
+policy rejected plugin/MCP imports; this historical source is not a diagnosis of
+the current host. The owner subsequently installed the native plugin successfully.
+Any current policy denial needs separately reviewed administrator integration,
+never an adapter bypass. No bootstrap file was
 changed by this connector. Actual user mounts have not been inspected; these paths are the
 connector contract, not a claim about an existing deployment.
 

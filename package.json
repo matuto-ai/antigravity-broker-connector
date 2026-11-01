@@ -1,6 +1,6 @@
 {
   "name": "@matuto-ai/antigravity-broker-connector",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "type": "module",
   "engines": {
     "node": ">=24.19.0 <25"
@@ -31,7 +31,9 @@
     "hooks.json",
     "skills/**",
     "docs/setup.md",
-    "docs/native-acceptance.md"
+    "docs/native-acceptance.md",
+    "docs/message-lifecycle.md",
+    "docs/candidate-verification.md"
   ],
   "repository": {
     "type": "git",

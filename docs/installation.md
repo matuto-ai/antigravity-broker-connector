@@ -1,5 +1,7 @@
 # Native MCP installation
 
+> Legacy diagnostic/test reference only. Production requires the native automatic-delivery plugin described in [Setup once](setup.md). Do not configure manual pull as a production fallback. In the unreleased 0.4.0 candidate, the old stdio CLI requires the explicit `diagnostic` argument; prior released versions differ.
+
 ## 1. Prerequisites
 
 Run inside the existing Antigravity sandbox, not on the host as a replacement
