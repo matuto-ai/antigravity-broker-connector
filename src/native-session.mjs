@@ -1,3 +1,4 @@
+import { createToolScope } from './tool-scope.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { writeFileSync, readFileSync, openSync, closeSync, fstatSync, fsyncSync, linkSync, unlinkSync, constants } from 'node:fs';
 import { join } from 'node:path';
@@ -23,6 +24,8 @@ export async function startNativeSession({config,conversationId,isAlive,signal,o
   let client;
   try {client=new BrokerClient({url:config.brokerUrl,tokenFile:config.tokenFile,caFile:config.caFile,insecureDevelopment:config.insecureDevelopment===true,inbox});}
   catch(error){inbox.close();throw error;}
+  const toolScope=createToolScope();
+  const recoveryAbort=new AbortController();let recoveryPromise;
   let active=true,stopping,monitor,notified=false;
   const unavailable=()=>{if(!notified){notified=true;queueMicrotask(()=>{try{onUnavailable();}catch{}});}};
   const alive=()=>{
@@ -34,15 +37,19 @@ export async function startNativeSession({config,conversationId,isAlive,signal,o
     if(['unauthenticated','forbidden','session_closed','session_mismatch','invalid_response','retry_window_elapsed'].includes(value.code)){active=false;unavailable();void close().catch(()=>{});}
   };
   const runtime=new AdapterRuntime({client,inbox,verifySession:alive,isAlive:alive,onDiagnostic:diagnostic});
-  const close=()=>stopping??=(async()=>{active=false;clearInterval(monitor);try{await runtime.stop({closeSession:!isAlive()});}finally{inbox.close();}})();
+  const close=()=>stopping??=(async()=>{active=false;recoveryAbort.abort();clearInterval(monitor);try{await toolScope.close();await recoveryPromise?.catch(()=>{});await runtime.stop({closeSession:!isAlive()});}finally{inbox.close();}})();
   const abort=()=>{void close().catch(()=>{});};signal?.addEventListener('abort',abort,{once:true});
   try {
     if(!alive())throw Error('native_host_unavailable');
     monitor=setInterval(()=>{if(!alive())void close().catch(()=>{});},1000);monitor.unref?.();
     await runtime.start(config.metadata);
     if(!alive())throw Error('native_host_unavailable');
-    const tools={...createTools({client,inbox}),...createCooperativeInbox({inbox,isActive:alive}),
-      broker_identity:async()=>({...identity,conversation_id:conversationId,endpoint_scope:'experimental_native_conversation',native_session_binding:true,automatic_delivery_certified:false})};
+    recoveryPromise=client.recoverOutgoing({limit:10,signal:AbortSignal.any([recoveryAbort.signal,...signal?[signal]:[],AbortSignal.timeout(5000)])});
+    await recoveryPromise.catch(()=>onDiagnostic({code:'outgoing_recovery_incomplete'}));
+    if(!alive())throw Error('native_host_unavailable');
+    const facade={...createTools({client,inbox}),...createCooperativeInbox({inbox,isActive:alive}),
+      broker_identity:async()=>({...identity,conversation_id:conversationId,endpoint_scope:'experimental_native_conversation',native_session_binding:true,mode:'automatic_required',delivery:'native_waiter',readiness:'native_wakeup_acceptance_unverified',automatic_delivery_certified:false})};
+    const tools=Object.fromEntries(Object.entries(facade).map(([name,fn])=>[name,(args,context={})=>toolScope.run(async operationSignal=>{if(!alive())throw Error('native_host_unavailable');return fn(args,{...context,signal:signal?AbortSignal.any([signal,operationSignal]):operationSignal});},context.signal)]));
     return {identity,inbox,tools,async close(){signal?.removeEventListener('abort',abort);await close();}};
   } catch(error){signal?.removeEventListener('abort',abort);await close();throw error;}
 }

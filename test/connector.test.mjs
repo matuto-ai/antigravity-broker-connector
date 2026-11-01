@@ -35,16 +35,16 @@ test('standalone MCP handshake, two-message FIFO, explicit ACK, reply and host-c
  const sender=registration('pi');await broker.request('/v1/sessions',{method:'POST',body:sender});
  const rpc=rpcStreams();const connector=await startConnector({config:{brokerUrl:broker.base,tokenFile,stateRoot:join(dir,'state'),insecureDevelopment:true,metadata:{name:'Antigravity',model:{provider:null,id:null,source:'unknown'},project:null}},...rpc});t.after(()=>connector.close());
  const init=await rpc.call('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'fixture',version:'1'}});assert.equal(init.result.serverInfo.name,'antigravity-broker-connector');assert.equal(init.result.serverInfo.version,'0.1.1');rpc.notify('notifications/initialized',{});
- const tools=await rpc.call('tools/list',{});assert.equal(tools.result.tools.length,7);
+ const tools=await rpc.call('tools/list',{});assert.equal(tools.result.tools.length,11);
  const tool=async(name,args={})=>{const r=await rpc.call('tools/call',{name,arguments:args});assert(!r.error,JSON.stringify(r));return JSON.parse(r.result.content[0].text);};
  assert.equal((await tool('broker_identity')).client_id,connector.identity.client_id);
  const ids=[];for(const text of ['one','two']){const r=await broker.request('/v1/messages',{method:'POST',session:sender.client_id,key:crypto.randomUUID(),body:sendBody(connector.identity.client_id,text)});assert.equal(r.status,202);ids.push(r.body.message_id);}
  for(let i=0;i<200&&connector.inbox.stats().pending_count<2;i++)await delay(10);
- const received=await tool('broker_receive');assert.equal(received.message_id,ids[0]);assert.match(received.message,/untrusted agent input/);
- const ack=await tool('broker_acknowledge',{message_id:received.message_id,receipt_token:received.receipt_token});assert.equal(ack.acknowledged,true);
+ const received=await tool('broker_receive');assert.equal(received.message_id,ids[0]);assert.match(received.message,/^Broker message from AI agent /);
+ const ack=await tool('broker_acknowledge',{message_id:received.message_id});assert.equal(ack.acknowledged,true);
  assert.equal((await tool('broker_receive')).message_id,ids[1]);
- const sent=await tool('broker_send',{recipient_id:sender.client_id,text:'reply',reply_to_message_id:ids[0],send_key:'reply-key'});assert(sent.message_id);
- const repeated=await tool('broker_send',{recipient_id:sender.client_id,text:'reply',reply_to_message_id:ids[0],send_key:'reply-key'});assert.equal(sent.message_id,repeated.message_id);
+ const sent=await tool('broker_send',{recipient_id:sender.client_id,text:'reply',reply_to_message_id:ids[0]});assert(sent.message_id);
+ const repeated=await tool('broker_send',{recipient_id:sender.client_id,text:'reply',reply_to_message_id:ids[0]});assert.notEqual(sent.message_id,repeated.message_id);assert.equal(Object.hasOwn(sent,'send_key'),false);
  const wrong=await rpc.call('tools/call',{name:'broker_acknowledge',arguments:{message_id:ids[1],receipt_token:'not-a-uuid'}});assert.equal(wrong.error.code,-32602);
  rpc.input.end();await connector.done;
  const own=await broker.request(`/v1/sessions/${connector.identity.client_id}`,{token:broker.b.token});assert.equal(own.body.closed,true);

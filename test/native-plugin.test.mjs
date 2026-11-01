@@ -47,7 +47,7 @@ test('gated native wiring: disconnected start, hook permits, HTTP FIFO, waiter n
   assert.match(await arm(),/attention required/);
   const silent=arm();
   const received=await nativeCall('broker_receive');assert.equal(received.message_id,sent.body.message_id);
-  await nativeCall('broker_acknowledge',{message_id:received.message_id,receipt_token:received.receipt_token});
+  await nativeCall('broker_acknowledge',{message_id:received.message_id});
   assert.equal((await nativeCall('broker_receive')).message,null);
   await nativeCall('broker_disconnect');assert.match(await silent,/disconnected/);
   await assert.rejects(nativeCall('broker_receive'),/native_not_connected/);

@@ -56,3 +56,14 @@ as complete until those observations are recorded.
 The native task arguments are taken from the installed host's schema. The plugin
 asks only for `CommandLine` and `WaitMsBeforeAsync=500`; it does not invent an
 `IsDaemon` argument or request persistent/background permission overrides.
+
+## Owner-reported live test — 2026-11-01
+
+The owner installed `psst-native` using the original scoped npm path and reported
+successful bidirectional Pi ↔ Antigravity messaging with model read receipts.
+This is meaningful native connectivity evidence for that tested pair, not an
+independent recording by this test suite or proof of all idle-wake/restart gates.
+Earlier missing-path/parser/owner-lock failures remain installation usability
+findings; the later same-path success means a universal `@` parser limitation
+must not be inferred. The read-only installation doctor now checks the actual
+root and gives the in-session slash command without source copying or policy changes.

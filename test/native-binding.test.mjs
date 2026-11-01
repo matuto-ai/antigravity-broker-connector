@@ -60,3 +60,15 @@ test('host death invalidates permits/isBound, and notice budgets persist across 
  assert.equal(f.binding.isBound(f.context.conversationId),false);
  assert.throws(()=>f.binding.consume({tool:'broker_connect',args}));
 });
+
+test('lifecycle tool permits require the same exact bound conversation, name and single-use arguments',t=>{
+ const f=setup(t);const connect=f.binding.issue({context:f.context,tool:'broker_connect',args:{}});f.binding.consume({tool:'broker_connect',args:connect});
+ for(const name of ['broker_sent_history','broker_message_content','broker_resend','broker_cancel']){
+  const args=name==='broker_sent_history'?{limit:10}:{message_id:randomUUID()};
+  const issued=f.binding.issue({context:f.context,tool:name,args});
+  assert.throws(()=>f.binding.consume({tool:name,args:{...issued,unexpected:true}}));
+  assert.deepEqual(f.binding.consume({tool:name,args:issued}).args,args);
+  assert.throws(()=>f.binding.consume({tool:name,args:issued}));
+  assert.throws(()=>f.binding.issue({context:{...f.context,conversationId:randomUUID()},tool:name,args}));
+ }
+});

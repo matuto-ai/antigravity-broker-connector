@@ -31,7 +31,7 @@ export async function startConnector({ config, input = process.stdin, output = p
     if (!active || input.readableEnded || input.destroyed) throw new Error('host_departed');
     const tools = { ...createTools({ client, inbox }), ...createCooperativeInbox({ inbox, isActive: () => active }),
       async broker_identity() { return { ...identity, endpoint_scope: 'mcp_process', native_session_binding: false,
-        local_mode: 'cooperative_pull', metadata: inbox.getState('metadata') }; } };
+        mode: 'diagnostic_only', local_mode: 'diagnostic_pull', metadata: inbox.getState('metadata') }; } };
     stdio = serveStdio({ input, output, tools, onClose: close, onDiagnostic });
     return { identity, inbox, client, runtime, tools, done: stdio.done,
       async close() { await stdio.close(); await close(); input.off('end', departed); input.off('error', departed); signal?.removeEventListener('abort', cancelled); } };
