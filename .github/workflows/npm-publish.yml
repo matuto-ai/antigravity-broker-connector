@@ -34,7 +34,7 @@ jobs:
         working-directory: antigravity-review-pair
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: node --input-type=module -e "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync('package.json')); if(p.name !== '@matuto-ai/antigravity-broker-connector' || process.env.RELEASE_TAG !== 'v'+p.version) process.exit(1)"
+        run: node --input-type=module -e "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync('package.json')); if(p.name !== '@matuto-ai/antigravity-psst-connector' || process.env.RELEASE_TAG !== 'v'+p.version) process.exit(1)"
       - run: npm run check && npm test && npm run test:pack
         working-directory: antigravity-review-pair
       - run: npm publish --access public --provenance --ignore-scripts

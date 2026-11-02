@@ -1,3 +1,9 @@
+# 0.6.0 — Unreleased
+
+- Rename the npm distribution and GitHub repository to `antigravity-psst-connector`.
+- Preserve native plugin identity, commands, private installation state and message journals.
+- Existing installations require an explicit package/source update; see `docs/migration-0.6.0.md`.
+
 # 0.3.1 (prepared, not yet published)
 
 - Restore the pinned Psst approval TLS fixture checkout in the npm release workflow; no test is skipped.

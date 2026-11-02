@@ -7,8 +7,8 @@ const temp=mkdtempSync(join(tmpdir(),'psst-pack-'));
 const run=(command,args,options={})=>{const r=spawnSync(command,args,{encoding:'utf8',env:{...process.env,npm_config_cache:join(temp,'npm-cache')},...options});if(r.status!==0)throw new Error(`${command} failed: ${r.stderr}`);return r.stdout;};
 try {
  const packed=JSON.parse(run('npm',['pack','--ignore-scripts','--json','--pack-destination',temp]));
- assert.equal(packed[0].name, '@matuto-ai/antigravity-broker-connector');
- assert.equal(packed[0].filename, `matuto-ai-antigravity-broker-connector-${packed[0].version}.tgz`);
+ assert.equal(packed[0].name, '@matuto-ai/antigravity-psst-connector');
+ assert.equal(packed[0].filename, `matuto-ai-antigravity-psst-connector-${packed[0].version}.tgz`);
  const entries=packed[0].files.map(x=>x.path);
  for(const path of ['bin/psst-antigravity.mjs','src/connector.mjs','src/pairing.mjs','vendor/psst/enrollment.mjs','docs/pairing.md','vendor/psst/reference/inbox.mjs','vendor/psst/LICENSE'])assert(entries.includes(path));
  for(const path of ['bin/psst-antigravity-native.mjs','scripts/prepare-native-plugin.mjs','src/native-plugin.mjs','src/native-installation.mjs','src/native-binding.mjs','src/native-process-waiter.mjs','docs/native-pilot.md'])assert(entries.includes(path));
@@ -16,7 +16,7 @@ try {
  for(const path of ['plugin.json','mcp_config.json','hooks.json','skills/psst-setup/SKILL.md','skills/psst/SKILL.md','src/approval-manager.mjs','vendor/psst/approval.mjs','vendor/psst/approval-source.json','docs/setup.md'])assert(entries.includes(path));
  const install=join(temp,'isolated');
  run('npm',['install','--ignore-scripts','--offline','--no-audit','--no-fund','--prefix',install,join(temp,packed[0].filename)]);
- const executable=join(install,'node_modules','@matuto-ai','antigravity-broker-connector','bin','psst-antigravity.mjs');
+ const executable=join(install,'node_modules','@matuto-ai','antigravity-psst-connector','bin','psst-antigravity.mjs');
  assert.match(run(process.execPath,[executable,'--help'],{cwd:temp}),/cooperative stdio MCP/);
  const doctor=JSON.parse(run(process.execPath,[executable,'doctor'],{cwd:temp}));
  assert.equal(doctor.package_version,packed[0].version);assert.equal(doctor.package_shape,'verified');
