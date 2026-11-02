@@ -25,7 +25,7 @@ export function inspectNativeInstallation(path, { platform = process.platform, v
     const manifest = JSON.parse(readFileSync(join(root, 'plugin.json'), 'utf8'));
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     const mcp = JSON.parse(readFileSync(join(root, 'mcp_config.json'), 'utf8'));
-    if (manifest.name !== 'psst-native' || pkg.name !== '@matuto-ai/antigravity-broker-connector' || manifest.version !== pkg.version || typeof pkg.version !== 'string') throw Error();
+    if (manifest.name !== 'psst-native' || pkg.name !== '@matuto-ai/antigravity-psst-connector' || manifest.version !== pkg.version || typeof pkg.version !== 'string') throw Error();
     if (mcp?.mcpServers?.psst?.command !== 'node' || JSON.stringify(mcp.mcpServers.psst.args) !== JSON.stringify(['./bin/psst-antigravity-native.mjs','serve','--experimental-native'])) throw Error();
     JSON.parse(readFileSync(join(root, 'hooks.json'), 'utf8'));
     verifyReference(join(root, 'vendor', 'psst'));

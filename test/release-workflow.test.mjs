@@ -41,6 +41,13 @@ test('package and native plugin release versions stay aligned', () => {
   assert.equal(plugin.version, pkg.version);
   assert.match(pkg.version, /^[0-9]+[.][0-9]+[.][0-9]+$/);
   for (const path of ['../README.md', '../docs/setup.md']) {
-    assert.ok(read(path).includes('@matuto-ai/antigravity-broker-connector@' + pkg.version), path + ' must document the prepared version');
+    assert.ok(read(path).includes('@matuto-ai/antigravity-psst-connector@' + pkg.version), path + ' must document the prepared version');
   }
+});
+
+test('operator release guide names only the prepared release tag', () => {
+  const pkg = JSON.parse(read('../package.json'));
+  const tags = [...read('../docs/release.md').matchAll(/`(v\d+\.\d+\.\d+)`/g)].map(match => match[1]);
+  assert.ok(tags.length > 0, 'release guide must name the exact prepared tag');
+  for (const tag of tags) assert.equal(tag, `v${pkg.version}`);
 });

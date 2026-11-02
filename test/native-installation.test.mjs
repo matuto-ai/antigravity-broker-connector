@@ -10,7 +10,7 @@ const source = fileURLToPath(new URL('../', import.meta.url));
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'agy-installation-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const pkg = join(root, 'node_modules', '@matuto-ai', 'antigravity-broker-connector');
+  const pkg = join(root, 'node_modules', '@matuto-ai', 'antigravity-psst-connector');
   cpSync(source, pkg, { recursive: true, filter: path => !path.includes('/.git') });
   return { root, pkg };
 }

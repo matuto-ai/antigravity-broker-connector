@@ -1,6 +1,6 @@
 # Psst for Antigravity
 
-> **Unreleased 0.5.1 candidate.** The readable receive presentation below is not in the published 0.4.0 release. Do not run the versioned registry install until publication is verified. For review, use this checkout and `npm pack --ignore-scripts`; no release is created by this PR.
+> **Unreleased 0.6.0 migration candidate.** This version moves to `@matuto-ai/antigravity-psst-connector`. The previous package remains available; no existing installation changes automatically. Use the versioned commands only after the new publication is verified. See [migration checklist](docs/migration-0.6.0.md).
 
 ## Native setup
 
@@ -56,15 +56,15 @@ Requires Linux and Node **24.19+ within major 24**. No dependencies or install
 scripts. For reviewed source commits already on `main`, Git installation is available:
 
 ```sh
-npm install --global 'github:matuto-ai/antigravity-broker-connector#main'
+npm install --global 'github:matuto-ai/antigravity-psst-connector#main'
 psst-antigravity --help
 ```
 
 For reproducibility, replace the branch with the reviewed commit SHA. The npm
-package is prepared as `@matuto-ai/antigravity-broker-connector`; **a prepared release
+package is prepared as `@matuto-ai/antigravity-psst-connector`; **a prepared release
 workflow is not evidence that it has been published**. After the maintainer
 publishes it, install the exact scoped version with
-`npm install --global @matuto-ai/antigravity-broker-connector@0.5.1`.
+`npm install --global @matuto-ai/antigravity-psst-connector@0.6.0`.
 The executable remains `psst-antigravity`.
 
 Use a private enrollment bundle produced by the broker administrator. Keep
