@@ -1,4 +1,4 @@
-name: adapter-fixtures
+name: Verify
 on:
   push:
     branches: ['main', 'feat/**']
@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 jobs:
-  fixture:
+  verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -29,11 +29,20 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24.19.0'
-      - run: npm run check && npm test && npm run test:pack
+      - name: Check source syntax
+        run: npm run check
         working-directory: antigravity-review-pair
-      - name: Official Antigravity plugin parser and installation (no authentication)
-        run: bash scripts/validate-official-native.sh
+      - name: Run local tests
+        run: npm run test:local
         working-directory: antigravity-review-pair
-      - name: Actual container removal and installation-only persistence
+      - name: Verify native host and protocol integration
+        run: |
+          npm run test:integration
+          bash scripts/validate-official-native.sh
+        working-directory: antigravity-review-pair
+      - name: Verify container persistence
         run: node scripts/container-persistence.mjs
+        working-directory: antigravity-review-pair
+      - name: Verify installable package
+        run: npm run test:pack
         working-directory: antigravity-review-pair

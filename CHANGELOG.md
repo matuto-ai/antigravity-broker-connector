@@ -15,7 +15,7 @@
 
 # Changelog
 
-## 0.4.1 (unreleased)
+## 0.5.1 (unreleased)
 
 - Render nonempty native receive results as readable other-agent messages while preserving the original structured result, full body, exact IDs and pending ledger. Native receive-only responses are bounded to1MiB for dual representations; other/configured limits stay unchanged. Host UI controls folding; no new hook or assistant turn.
 

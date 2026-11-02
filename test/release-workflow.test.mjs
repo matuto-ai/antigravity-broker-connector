@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const pin = '72f5d2d1b834e02cfb6b2f7dc11c6f1a55729344';
 const release = read('../.github/workflows/npm-publish.yml');
-const ci = read('../.github/workflows/test.yml');
+const ci = read('../.github/workflows/verify.yaml');
 
 function approvalCheckout(workflow) {
   // Inspect existing step boundaries without adding a YAML/runtime dependency.
