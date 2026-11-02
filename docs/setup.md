@@ -147,3 +147,19 @@ provider auth separate. Test both the permitted exact plugin and malicious
 extra/symlink/modified-command cases against the real archived policy before a
 user deploys the revised sandbox. This is an integration specification, not a
 claim that the existing archived security policy already permits the connector.
+
+
+## Descriptive project and model metadata
+
+Project uses explicit local `project`, then the selected environment variable
+(`PSST_PROJECT_ENV`, local `projectEnv`, or default `AI_AGENTS_SANDBOX_PROJECT_NAME`),
+then the basename of a single verified native workspace. Only the selected bounded
+label is read; full paths and environment dumps are not sent. Native hook model
+names are observed metadata only after host/conversation validation; configured
+metadata remains the fallback. Registration uses this metadata and the next send
+refreshes it without changing the identity or retry snapshot. Metadata never grants
+permissions and cannot switch the bound conversation.
+
+PreToolUse calls unrelated to Psst return `allow`, which delegates to the remaining
+hooks and normal native policy, not `auto_approve`. The first-conversation fence
+still applies: this correction does not migrate a mailbox after `/compact`.

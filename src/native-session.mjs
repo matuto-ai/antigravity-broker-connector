@@ -10,7 +10,7 @@ import { createCooperativeInbox } from './cooperative-inbox.mjs';
 import { prepareStateRoot } from './connector-config.mjs';
 
 /** Experimental native session. Caller owns the native hook permit boundary. */
-export async function startNativeSession({config,conversationId,isAlive,signal,onDiagnostic=()=>{},onUnavailable=()=>{}}) {
+export async function startNativeSession({config,conversationId,isAlive,signal,observeMetadata=null,onDiagnostic=()=>{},onUnavailable=()=>{}}) {
   prepareStateRoot(config.stateRoot);
   const partition=createHash('sha256').update(JSON.stringify([config.brokerUrl,config.enrollment?.credentialId??config.tokenFile,conversationId])).digest('hex');
   const directory=join(config.stateRoot,`native-${partition}`);prepareStateRoot(directory);
@@ -47,7 +47,7 @@ export async function startNativeSession({config,conversationId,isAlive,signal,o
     recoveryPromise=client.recoverOutgoing({limit:10,signal:AbortSignal.any([recoveryAbort.signal,...signal?[signal]:[],AbortSignal.timeout(5000)])});
     await recoveryPromise.catch(()=>onDiagnostic({code:'outgoing_recovery_incomplete'}));
     if(!alive())throw Error('native_host_unavailable');
-    const facade={...createTools({client,inbox}),...createCooperativeInbox({inbox,isActive:alive}),
+    const facade={...createTools({client,inbox,observeMetadata}),...createCooperativeInbox({inbox,isActive:alive}),
       broker_identity:async()=>({...identity,conversation_id:conversationId,endpoint_scope:'experimental_native_conversation',native_session_binding:true,mode:'automatic_required',delivery:'native_waiter',readiness:'native_wakeup_acceptance_unverified',automatic_delivery_certified:false})};
     const tools=Object.fromEntries(Object.entries(facade).map(([name,fn])=>[name,(args,context={})=>toolScope.run(async operationSignal=>{if(!alive())throw Error('native_host_unavailable');return fn(args,{...context,signal:signal?AbortSignal.any([signal,operationSignal]):operationSignal});},context.signal)]));
     return {identity,inbox,tools,async close(){signal?.removeEventListener('abort',abort);await close();}};
