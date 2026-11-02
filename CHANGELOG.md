@@ -38,3 +38,15 @@
 Real interactive idle wakeup, hook argument overwrite reaching an executed native MCP tool, and immediate cleanup when a conversation alone is deleted remain unverified. The headless native permission denial was not bypassed; onboarding terms were not accepted. This release does **not** certify production automatic delivery. See [native pilot limitations](docs/native-pilot.md).
 
 The release includes source, deterministic tests, and package-install validation. It does not deploy a broker, enroll credentials, install into a user's client, or change native permission policy.
+
+
+### 0.6.0 native pilot corrections (unreleased)
+
+- Correct unrelated PreToolUse pass-through with explicit normal-policy delegation,
+  preserving all Psst binding/permit checks and without permission overrides.
+- Use English readable message headings and Details with exact IDs, project and
+  model when present; raw provider/correlation fields and receipts remain intact.
+- Observe native model and project labels after verified hook context; preserve
+  configured/env precedence, durable mailbox paths and send retry snapshots.
+- Same-host conversation replacement after `/compact` remains a separate native
+  lifecycle limitation; this patch does not weaken the fence or migrate mailboxes.

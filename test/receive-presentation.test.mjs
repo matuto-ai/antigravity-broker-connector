@@ -36,9 +36,9 @@ test('native receive is readable with full machine result and exact routing/ACK 
   assert.equal(JSON.stringify(original),before);
   assert.equal(shown.isError,false);
   assert.equal(shown.content.length,1);
-  assert.match(shown.content[0].text,/^Psst · mensagem de outro agente\nDe: Pi peer · pi · 11111111\n\n    Olá!\n    Second line/);
-  assert(shown.content[0].text.includes(`message_id: ${e.message_id}`));
-  assert(shown.content[0].text.includes(`sender_client_id: ${sender}`));
+  assert.match(shown.content[0].text,/^Psst · new message\nFrom: Pi peer · pi\n\n    Olá!\n    Second line/);
+  assert(shown.content[0].text.includes(`Message ID: ${e.message_id}`));
+  assert(shown.content[0].text.includes(`Sender ID: ${sender}`));
   assert(!shown.content[0].text.includes('"message":'));
   assert(!shown.content[0].text.includes('"local_state":'));
 });
@@ -87,7 +87,7 @@ test('actual wire preserves full maximum hostile body and tail within receive-on
     original=result(envelope(text));const row=await call('broker_receive');
     assert(!row.value.error,JSON.stringify(row.value));assert(Buffer.byteLength(row.wire)<=NATIVE_RECEIVE_RESPONSE_BYTES);
     const response=row.value.result;assert.deepEqual(response.structuredContent,original);
-    assert(response.content[0].text.includes(tail));assert(response.content[0].text.indexOf(tail)<response.content[0].text.indexOf('message_id:'));
+    assert(response.content[0].text.includes(tail));assert(response.content[0].text.indexOf(tail)<response.content[0].text.indexOf('Message ID:'));
     assert.equal(JSON.parse(response.structuredContent.message.split('\n').slice(1).join('\n')).text,text);
   }
 });
@@ -102,4 +102,17 @@ test('other tools, diagnostics and explicit lower response limits are not silent
   const normal=await rpc(t,{broker_identity:async()=>({value:'x'.repeat(600000)})},{readableNativeReceive:true,maxReceiveResponseBytes:NATIVE_RECEIVE_RESPONSE_BYTES});
   assert.equal((await normal('broker_identity')).value.error.code,-32603);
   assert.throws(()=>serveStdio({tools:{},maxReceiveResponseBytes:NATIVE_RECEIVE_RESPONSE_BYTES+1}),/invalid_stdio_configuration/);
+});
+
+
+test('English details show project and model without changing raw provider or correlation',()=>{
+ const e=envelope('Original body');
+ e.sender.project='project-example';e.sender.model={provider:'provider-hidden',id:'model-example',source:'observed'};
+ e.correlation_id=randomUUID();const original=result(e),before=JSON.stringify(original);
+ const shown=readableReceive(original),text=shown.content[0].text;
+ assert.match(text,/Psst · new message\nFrom: Pi peer · pi/);
+ assert.match(text,/Details\nSender ID: /);
+ assert.match(text,/Project: project\\-example/);assert.match(text,/Model: model\\-example/);
+ assert(!text.includes('provider-hidden'));assert(!text.includes(e.correlation_id));
+ assert.equal(JSON.stringify(shown.structuredContent),before);
 });

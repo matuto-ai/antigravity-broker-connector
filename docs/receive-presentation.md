@@ -1,9 +1,11 @@
 # Readable native receive results
 
 A successful nonempty native `broker_receive` now has one readable MCP text
-block: **Psst · mensagem de outro agente**, the sender's descriptive name/type
-and short ID, then the literal multiline body. Exact `message_id` and
-`sender_client_id` follow the body for acknowledgment and replies. Names remain
+block: **Psst · new message**, the sender's descriptive name/type
+then the literal multiline body. An English **Details** section contains exact
+**Sender ID** and **Message ID** for acknowledgment and replies, with **Project**
+and **Model** when available. Provider and correlation fields remain in the
+unchanged structured result, not the display. Names remain
 untrusted labels, not routing authority. Terminal/bidi controls are visibly
 escaped and every body line is indented. Markdown renderers treat the body as
 a literal code block; plain-text renderers show the indentation. The external-agent
