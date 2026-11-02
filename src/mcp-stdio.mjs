@@ -1,5 +1,6 @@
 // Adapted from the pinned Psst MCP transport. Extension: cooperative receipt and identity tools.
 import { StringDecoder } from 'node:string_decoder';
+import { readableReceive } from './receive-presentation.mjs';
 import { canonical } from '../vendor/psst/src/protocol.mjs';
 import { invokeTool } from '../vendor/psst/reference/tools.mjs';
 
@@ -52,10 +53,11 @@ function validArguments(value, schema) {
  * once and is not an agent tool. No credentials are accepted by this interface.
  */
 export function serveStdio({ input = process.stdin, output = process.stdout, tools, onClose = async () => {},
-  onDiagnostic = () => {}, maxFrameBytes = 128 * 1024, maxResponseBytes = 512 * 1024, maxInflight = 8,
+  onDiagnostic = () => {}, maxFrameBytes = 128 * 1024, maxResponseBytes = 512 * 1024, readableNativeReceive = false, maxReceiveResponseBytes = maxResponseBytes, maxInflight = 8,
   definitions = TOOL_DEFINITIONS, instructions } = {}) {
   if (!tools || !input?.on || !output?.write || !Number.isSafeInteger(maxFrameBytes) || maxFrameBytes < 1024 || maxFrameBytes > 1024 * 1024
     || !Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1024 || maxResponseBytes > 1024 * 1024
+    || typeof readableNativeReceive !== 'boolean' || !Number.isSafeInteger(maxReceiveResponseBytes) || maxReceiveResponseBytes < 1024 || maxReceiveResponseBytes > 1024 * 1024
     || !Number.isSafeInteger(maxInflight) || maxInflight < 1 || maxInflight > 32) throw new Error('invalid_stdio_configuration');
   const transportAbort = new AbortController();
   let phase = 'new', buffer = '', active = 0, pendingWrites = 0, closed = false;
@@ -70,12 +72,12 @@ export function serveStdio({ input = process.stdin, output = process.stdout, too
     try { await onClose(); } catch { diagnostic('stdio_close_failed'); }
     closeResolve(); return done;
   };
-  function send(message) {
+  function send(message, limit = maxResponseBytes) {
     if (closed) return;
     if (pendingWrites >= maxInflight) { void close('stdio_output_backpressure'); return; }
     let line;
     try { line = canonical(message) + '\n'; } catch { void close('stdio_invalid_response'); return; }
-    if (Buffer.byteLength(line) > maxResponseBytes) {
+    if (Buffer.byteLength(line) > limit) {
       line = JSON.stringify({ jsonrpc: '2.0', id: message.id ?? null, error: { code: -32603, message: 'Response exceeds the configured byte limit; no native acceptance was recorded.' } }) + '\n';
     }
     pendingWrites++;
@@ -114,7 +116,8 @@ export function serveStdio({ input = process.stdin, output = process.stdout, too
       // JSON-RPC IDs can be reused after completion: they are not durable intent IDs.
       // Each admitted invocation is new; HTTP retry/reconnect recovery retains its private key.
       const result = await invokeTool(tools, p.name, p.arguments ?? {}, { signal: transportAbort.signal });
-      send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: canonical(result) }], isError: Boolean(result?.error) } }); return;
+      const presented = readableNativeReceive && p.name === 'broker_receive' ? readableReceive(result) : null;
+      send({ jsonrpc: '2.0', id, result: presented ?? { content: [{ type: 'text', text: canonical(result) }], isError: Boolean(result?.error) } }, presented ? maxReceiveResponseBytes : maxResponseBytes); return;
     }
     error(id, -32601, 'Method not supported by this tools-only stdio server.');
   }

@@ -20,3 +20,11 @@ expiry, cancellation or error needs explicit intervention, not repeated setup.
 Existing approved authorization stays active during explicit replacement setup.
 No request or key may be created on ordinary startup. Credentials are stored
 privately by the connector; do not inspect or display its private installation files.
+
+Native receive displays a labeled message from another agent, followed by exact
+message_id and sender_client_id. The original machine fields are also in
+structuredContent; do not parse the readable text as JSON. Read the full body
+before ACK. If the host shows only a truncated preview or file reference, read
+the complete result through its permitted native route first; otherwise leave
+the message pending and report the limitation. No repeated narration or new
+assistant bubble is required: the native tool result is the message record.

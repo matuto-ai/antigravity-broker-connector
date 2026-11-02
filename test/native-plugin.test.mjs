@@ -15,7 +15,9 @@ test('gated native wiring: disconnected start, hook permits, HTTP FIFO, waiter n
   const broker=await httpFixture(t),tokenFile=join(root,'token');writeFileSync(tokenFile,broker.b.token,{mode:0o600});
   const host=processIdentity(process.pid),context={host,conversationId:randomUUID()};
   let configReads=0;
-  const server=await serveNativePlugin({base:join(root,'native'),host,input:new PassThrough(),output:new PassThrough(),
+  const input=new PassThrough(),output=new PassThrough(),frames=[];let wire='';output.on('data',chunk=>{wire+=chunk;while(wire.includes('\n')){const at=wire.indexOf('\n');frames.push(JSON.parse(wire.slice(0,at)));wire=wire.slice(at+1);}});
+  const ask=async(method,params,id)=>{input.write(JSON.stringify({jsonrpc:'2.0',method,params,...id?{id}:{}})+'\n');if(!id)return;for(let i=0;i<100;i++){const found=frames.find(row=>row.id===id);if(found)return found;await new Promise(r=>setTimeout(r,5));}throw Error('native_rpc_timeout');};
+  const server=await serveNativePlugin({base:join(root,'native'),host,input,output,
     configReader:()=>{configReads++;return {brokerUrl:broker.base,tokenFile,stateRoot:join(root,'state'),insecureDevelopment:true,metadata:{name:'Native fixture',model:{provider:null,id:null,source:'unknown'},project:null}};}});
   t.after(()=>server.close());assert.equal(configReads,0);
   const nativeCall=async(tool,args={})=>{
@@ -47,6 +49,9 @@ test('gated native wiring: disconnected start, hook permits, HTTP FIFO, waiter n
   assert.match(await arm(),/attention required/);
   const silent=arm();
   const received=await nativeCall('broker_receive');assert.equal(received.message_id,sent.body.message_id);
+  await ask('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'native-receive-fixture',version:'1'}},1);await ask('notifications/initialized',{});
+  const shown=await ask('tools/call',{name:'broker_receive',arguments:server.binding.issue({context,tool:'broker_receive',args:{}})},2);
+  assert.deepEqual(shown.result.structuredContent,received);assert.match(shown.result.content[0].text,/^Psst · mensagem de outro agente/);assert.match(shown.result.content[0].text,/\n    synthetic untrusted inbox text/);
   await nativeCall('broker_acknowledge',{message_id:received.message_id});
   assert.equal((await nativeCall('broker_receive')).message,null);
   await nativeCall('broker_disconnect');assert.match(await silent,/disconnected/);

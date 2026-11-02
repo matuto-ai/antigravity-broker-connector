@@ -1,3 +1,4 @@
+import { NATIVE_RECEIVE_RESPONSE_BYTES } from './receive-presentation.mjs';
 // Runnable experimental integration; separate opt-in entrypoint, not default MCP.
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -146,7 +147,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
     if(!session||session.conversationId!==verified.conversationId)throw Error('native_not_connected');
     return session.tools[def.name](verified.args,context);
   };
-  const stdio=serveStdio({input,output,tools,definitions:NATIVE_DEFINITIONS,onClose:close,
+  const stdio=serveStdio({input,output,tools,readableNativeReceive:true,maxReceiveResponseBytes:NATIVE_RECEIVE_RESPONSE_BYTES,definitions:NATIVE_DEFINITIONS,onClose:close,
     instructions:'Psst native automatic waiter delivery. Saved approval reconnects only after native binding. Use broker_setup for explicit URL-only enrollment; approval happens in the broker UI. The native hook supplies __psst_permit. After connection, run waiter_command with native run_command WaitMsBeforeAsync=500 and end the turn. On its notice, receive, read, acknowledge message_id, drain FIFO and re-arm. Retry and receipt keys stay internal. This wakeup route still requires native acceptance verification.'});
   const abort=()=>{void stdio.close();};signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   return {directory,binding,tools,done:stdio.done,async close(){signal?.removeEventListener('abort',abort);await stdio.close();}};
