@@ -1,4 +1,6 @@
 // Test-only. Must run in a Docker --network none container, never on a user host.
+import {TerminalScreen} from './terminal-screen.mjs';
+import {consentState,postConsentState} from './consent-state.mjs';
 import assert from 'node:assert/strict';
 import {networkInterfaces} from 'node:os';
 import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
@@ -28,9 +30,32 @@ const provider=createServer(async(req,res)=>{if(requests.length>=20){res.writeHe
  requests.at(-1).child=isChild;requests.at(-1).tool=parts[0]?.functionCall?.name;response={candidates:[{content:{role:'model',parts},finishReason:'STOP'}],usageMetadata:{promptTokenCount:1,candidatesTokenCount:1,totalTokenCount:2}};}
  const sse=req.url.includes('alt=sse');res.writeHead(200,{'content-type':sse?'text/event-stream':'application/json'});res.end(sse?'data: '+JSON.stringify(response)+'\n\n':JSON.stringify(req.url.toLowerCase().includes('streamgenerate')?[response]:response));});
 await new Promise(resolve=>provider.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${provider.address().port}`;
-writeFileSync(home+'/.gemini/antigravity-cli/settings.json',JSON.stringify({colorScheme:'terminal',modelProvider:'gemini',model:'fixture',customModelsConfig:{customModels:{fixture:{modelName:'gemini-api://offline-fixture/models/fixture',label:'fixture',apiProvider:'API_PROVIDER_GOOGLE_GEMINI',toolFormatterType:'TOOL_FORMATTER_TYPE_NONE'}}}}));
-const nativeArgs=['--model','fixture','--print','Run the synthetic read-only MCP probe once, then stop.','--output-format','json','--print-timeout','20s'];const child=spawn(mode==='compact'?'script':'/native/antigravity',mode==='compact'?['-q','-e','-c',"/native/antigravity --model fixture --prompt-interactive 'Run the synthetic read-only MCP probe once, then stop.'",'/dev/null']:nativeArgs,{cwd:root,env:{HOME:home,PATH:'/usr/local/bin:/usr/bin:/bin',TMPDIR:'/tmp',GEMINI_API_KEY:'offline-fixture-only',GOOGLE_GEMINI_BASE_URL:url,TERM:'xterm-256color'},stdio:[mode==='compact'?'pipe':'ignore','pipe','pipe']});let out='',err='',overflow=false,timedOut=false;child.stdout.on('data',b=>{out+=b;if(out.length>65536){overflow=true;child.kill('SIGKILL');}});child.stderr.on('data',b=>{err+=b;if(err.length>65536){overflow=true;child.kill('SIGKILL');}});let themeSelected=false,compactIssued=false,probeIssued=false,stoppedAfterCompact=false;const compactTimers=[];
-const compactPoll=mode==='compact'?setInterval(()=>{if(!themeSelected&&out.includes('Choose your color scheme:')){themeSelected=true;child.stdin.write('\r');return;}if(!existsSync(events)||!existsSync(capture))return;const observed=readFileSync(events,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);const calls=readFileSync(capture,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);const stops=observed.filter(h=>h.event==='Stop'&&h.fullyIdle===true&&['model_stop','NO_TOOL_CALL'].includes(h.terminationReason));if(false&&!compactIssued&&calls.length===1&&stops.length){compactIssued=true;child.stdin.write('/compact\r');}else if(compactIssued&&!probeIssued&&out.includes('Conversation compacted')){probeIssued=true;toolSent=false;child.stdin.write('Run the synthetic read-only identity probe after compact.\r');}else if(probeIssued&&calls.length===2&&stops.some(h=>h.conversationId===calls[1].meta?.['antigravity.google/conversation_id']&&h.conversationId!==calls[0].meta?.['antigravity.google/conversation_id'])&&!stoppedAfterCompact){stoppedAfterCompact=true;child.stdin.write('\x03');compactTimers.push(setTimeout(()=>child.stdin.end(),250));}},100):null;
+writeFileSync(home+'/.gemini/antigravity-cli/settings.json',JSON.stringify({permissions:{allow:['mcp(fixture/fixture_identity)']},colorScheme:'terminal',modelProvider:'gemini',model:'fixture',customModelsConfig:{customModels:{fixture:{modelName:'gemini-api://offline-fixture/models/fixture',label:'fixture',apiProvider:'API_PROVIDER_GOOGLE_GEMINI',toolFormatterType:'TOOL_FORMATTER_TYPE_NONE'}}}}));
+const nativeArgs=['--model','fixture','--print','Run the synthetic read-only MCP probe once, then stop.','--output-format','json','--print-timeout','20s'];const child=spawn(mode==='compact'?'script':'/native/antigravity',mode==='compact'?['-q','-e','-c',"stty cols 120 rows 40; /native/antigravity --model fixture --prompt-interactive 'Run the synthetic read-only MCP probe once, then stop.'",'/dev/null']:nativeArgs,{cwd:root,env:{HOME:home,PATH:'/usr/local/bin:/usr/bin:/bin',TMPDIR:'/tmp',GEMINI_API_KEY:'offline-fixture-only',GOOGLE_GEMINI_BASE_URL:url,TERM:'xterm-256color'},stdio:[mode==='compact'?'pipe':'ignore','pipe','pipe']});const screen=new TerminalScreen(120,40);let lastScreenChange=Date.now(),previousScreen='';let out='',err='',overflow=false,timedOut=false;child.stdout.on('data',b=>{lastScreenChange=Date.now();screen.write(b);const current=screen.text();if(current!==previousScreen){previousScreen=current;lastScreenChange=Date.now();}out+=b;if(out.length>65536){overflow=true;child.kill('SIGKILL');}});child.stderr.on('data',b=>{lastScreenChange=Date.now();err+=b;if(err.length>65536){overflow=true;child.kill('SIGKILL');}});let collectionToggleSent=false,collectionUnchecked=false,termsAccepted=false,termsAcceptanceSent=false,consentBlocked=false,acceptScreenVersion=0;const consentEvidence=[];let themeSelected=false,compactIssued=false,probeIssued=false,stoppedAfterCompact=false;const compactTimers=[];
+const compactPoll=mode==='compact'?setInterval(()=>{
+ const current=screen.text();if(!screen.complete||Date.now()-lastScreenChange<250)return;
+ if(!themeSelected&&current.includes('Choose your color scheme:')&&/^\s*> terminal(?:\s|$)/m.test(current)){themeSelected=true;child.stdin.write('\r');return;}
+ const consent=consentState(current);
+ if(termsAcceptanceSent&&!termsAccepted){if(screen.version>acceptScreenVersion&&!consent.terms){termsAccepted=true;consentBlocked=true;consentEvidence.push(postConsentState(current));child.stdin.write('\x03');child.stdin.end();clearInterval(compactPoll);return;}else return;}
+ if(consent.terms&&!termsAccepted){
+  if(!collectionToggleSent&&consent.mayUncheck){collectionToggleSent=true;consentEvidence.push({action:'uncheck_optional_collection',screen:current});child.stdin.write(' ');return;}
+  if(collectionToggleSent&&consent.unchecked&&!consent.checked){
+   collectionUnchecked=true;
+   if(consent.mayAccept){termsAcceptanceSent=true;acceptScreenVersion=screen.version;consentEvidence.push({action:'accept_terms_collection_unchecked',screen:current});child.stdin.write('\r');return;}
+   // Full modal is now readable, but no focused accept control has been proved.
+   consentBlocked=true;consentEvidence.push({action:'stop_accept_control_unverified',screen:current});child.stdin.write('\x03');child.stdin.end();clearInterval(compactPoll);return;
+  }
+  return;
+ }
+ if(!termsAccepted||screen.version<=acceptScreenVersion||consent.terms)return;
+ if(!existsSync(events)||!existsSync(capture))return;
+ const observed=readFileSync(events,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+ const calls=readFileSync(capture,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+ const stops=observed.filter(h=>h.event==='Stop'&&h.fullyIdle===true&&['model_stop','NO_TOOL_CALL'].includes(h.terminationReason));
+ if(!compactIssued&&calls.length===1&&stops.length){compactIssued=true;child.stdin.write('/compact\r');}
+ else if(compactIssued&&!probeIssued&&current.includes('Conversation compacted')){probeIssued=true;toolSent=false;child.stdin.write('Run the synthetic read-only identity probe after compact.\r');}
+ else if(probeIssued&&calls.length===2&&stops.some(h=>h.conversationId===calls[1].meta?.['antigravity.google/conversation_id']&&h.conversationId!==calls[0].meta?.['antigravity.google/conversation_id'])&&!stoppedAfterCompact){stoppedAfterCompact=true;child.stdin.write('\x03');compactTimers.push(setTimeout(()=>child.stdin.end(),250));}
+},100):null;
 const timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL');},30000);const code=await new Promise(resolve=>child.once('close',resolve));clearTimeout(timer);clearInterval(compactPoll);for(const t of compactTimers)clearTimeout(t);provider.close();
 const mcp=existsSync(capture)?readFileSync(capture,'utf8').trim().split('\n').map(JSON.parse):[];const hook=existsSync(events)?readFileSync(events,'utf8').trim().split('\n').map(JSON.parse):[];
 let nativeResult;try{nativeResult=JSON.parse(out.trim());}catch{}
@@ -38,12 +63,14 @@ const rootId=mcp[0]?.meta?.['antigravity.google/root_conversation_id'];const uui
 const metadataVerified=mcp.length===(['root','lazy'].includes(mode)?1:2)&&mcp[0]?.meta?.['antigravity.google/conversation_id']===rootId&&mcp[0].name==='fixture_identity'&&typeof rootId==='string'&&uuid.test(rootId)&&(mode==='compact'||rootId===nativeResult?.conversation_id)&&hook.some(h=>h.event==='SessionStart'&&h.conversationId===rootId&&h.environmentConversationId===rootId);
 const childVerified=mode!=='child'||mcp.some(call=>call.name==='fixture_identity'&&call.meta?.['antigravity.google/root_conversation_id']===rootId&&call.meta?.['antigravity.google/conversation_id']!==rootId&&uuid.test(call.meta?.['antigravity.google/conversation_id']??'')&&hook.some(h=>h.conversationId===call.meta['antigravity.google/conversation_id']&&h.environmentConversationId===h.conversationId));
 const compactVerified=mode!=='compact'||compactIssued&&probeIssued&&stoppedAfterCompact&&!timedOut&&!overflow&&[0,130].includes(code)&&new Set(hook.map(h=>h.hostPid+':'+h.hostStart)).size===1&&mcp.length===2&&mcp[1].name==='fixture_identity'&&uuid.test(mcp[1].meta?.['antigravity.google/root_conversation_id']??'')&&mcp[1].meta?.['antigravity.google/root_conversation_id']!==rootId&&mcp[1].meta?.['antigravity.google/root_conversation_id']===mcp[1].meta?.['antigravity.google/conversation_id']&&hook.some(h=>h.conversationId===mcp[1].meta['antigravity.google/conversation_id']&&h.environmentConversationId===h.conversationId);
-console.log(JSON.stringify({mode,themeSelected,timedOut,overflow,compactIssued,probeIssued,compactVerified,childVerified,isolation:'loopback-only',nativeExit:code,requests,hook,mcp,result:out.slice(-6000),error:err.slice(-2000),acceptance:metadataVerified?'native_root_metadata_verified':'native_root_metadata_unverified'}));
-// This qualification observes normal policy; it must never grant permission to force success.
+console.log(JSON.stringify({mode,themeSelected,collectionToggleSent,collectionUnchecked,termsAcceptanceSent,termsAccepted,consentBlocked,consentEvidence,terminalScreen:screen.text(),timedOut,overflow,compactIssued,probeIssued,compactVerified,childVerified,isolation:'loopback-only',nativeExit:code,requests,hook,mcp,result:out.slice(-6000),error:err.slice(-2000),acceptance:metadataVerified?'native_root_metadata_verified':'native_root_metadata_unverified'}));
+// Exact fixture-only MCP read permission and collection-disabled ToS acceptance were explicitly authorized.
+// No other permission scope or production configuration is changed.
 if(mode!=='compact')assert.equal(code,0,'native fixture failed');assert(metadataVerified,'native root metadata not verified; inspect normal permission result, do not bypass');
 
 assert(childVerified,'native child provenance not verified; do not infer or bypass');
 
+if(mode==='compact')assert(collectionUnchecked&&termsAccepted&&!consentBlocked,'terms acceptance with collection unchecked not verified');
 assert(compactVerified,'actual native compact transition not verified; do not infer success');
 
 if(mode==='lazy')assert(hook.some(h=>h.event==='PreToolUse'&&h.toolName==='call_mcp_tool'),'lazy native wrapper hook not observed');

@@ -15,7 +15,7 @@ tar -xzf "$tmp/cli.tgz" -C "$tmp" antigravity
 chmod 755 "$tmp" "$tmp/antigravity"
 status=0
 for mode in root child lazy compact; do
-timeout --kill-after=5s 50s docker run --rm --name "$name" --network none --user 1000:1000 --read-only --memory 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m --mount "type=bind,src=$tmp/antigravity,dst=/native/antigravity,readonly" --mount "type=bind,src=$root/worker.mjs,dst=/fixture/worker.mjs,readonly" -e HOME=/tmp/proof-home "$image" node /fixture/worker.mjs "$mode" || status=1
+timeout --kill-after=5s 50s docker run --rm --name "$name" --network none --user 1000:1000 --read-only --memory 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m --mount "type=bind,src=$tmp/antigravity,dst=/native/antigravity,readonly" --mount "type=bind,src=$root/worker.mjs,dst=/fixture/worker.mjs,readonly" --mount "type=bind,src=$root/terminal-screen.mjs,dst=/fixture/terminal-screen.mjs,readonly" --mount "type=bind,src=$root/consent-state.mjs,dst=/fixture/consent-state.mjs,readonly" -e HOME=/tmp/proof-home "$image" node /fixture/worker.mjs "$mode" || status=1
 docker rm -f "$name" >/dev/null 2>&1 || true
 done
 exit "$status"
