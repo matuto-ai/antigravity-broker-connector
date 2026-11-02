@@ -24,12 +24,18 @@ export function postConsentState(screen) {
 }
 
 // Only the recorded checkbox -> Previous -> Done controls are eligible for bounded
-// navigation. Each arrow requires new, settled screen evidence from the owner.
+// navigation. Horizontal Previous -> Done uses one authorized Right, not an
+// inferred Enter. The next settled screen must visibly prove Done focus.
 export function consentNavigation(state, previousFocus=null, steps=0) {
  if(!state.terms||!state.unchecked||state.checked||state.focusCount!==1)return {action:'stop'};
  if(state.mayAccept)return {action:'accept'};
  if(!state.nativeButtons||!state.arrowNavigation||steps>=2)return {action:'stop'};
  if(state.focusedUnchecked&&previousFocus===null&&steps===0)return {action:'down',focus:'checkbox'};
- if(state.selectedPrevious&&previousFocus==='checkbox'&&steps===1)return {action:'down',focus:'previous'};
+ if(state.selectedPrevious&&previousFocus==='checkbox'&&steps===1)return {action:'right',focus:'previous'};
  return {action:'stop'};
+}
+
+export function navigationRenderState(sentVersion,currentVersion,elapsedMs){
+ if(sentVersion!==currentVersion)return 'changed';
+ return elapsedMs<1000?'wait':'stop';
 }
