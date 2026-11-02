@@ -36,7 +36,7 @@ const compactPoll=mode==='compact'?setInterval(()=>{
  const current=screen.text();if(parserFailed||overflow||timedOut||!screen.complete||Date.now()-Math.max(lastScreenChange,screen.lastParsedAt)<250)return;
  if(!themeSelected&&current.includes('Choose your color scheme:')&&/^\s*> terminal(?:\s|$)/m.test(current)){themeSelected=true;child.stdin.write('\r');return;}
  const consent=consentState(current);
- if(termsAcceptanceSent&&!termsAccepted){if(screen.version>acceptScreenVersion&&!consent.terms){termsAccepted=true;consentBlocked=true;consentEvidence.push(postConsentState(current));child.stdin.write('\x03');child.stdin.end();clearInterval(compactPoll);return;}else return;}
+ if(termsAcceptanceSent&&!termsAccepted){if(screen.version>acceptScreenVersion&&!consent.terms){termsAccepted=true;consentBlocked=true;consentEvidence.push(postConsentState(current));child.kill('SIGTERM');clearInterval(compactPoll);return;}else return;}
  if(consent.terms&&!termsAccepted){
   if(!collectionToggleSent&&consent.mayUncheck){collectionToggleSent=true;consentEvidence.push({action:'uncheck_optional_collection',screen:current});child.stdin.write(' ');return;}
   if(collectionToggleSent&&consent.unchecked&&!consent.checked){
@@ -46,7 +46,7 @@ const compactPoll=mode==='compact'?setInterval(()=>{
    if(navigation.action==='down'){navigationSteps++;navigationFocus=navigation.focus;navigationVersion=screen.version;consentEvidence.push({action:'navigate_down',focus:navigationFocus,step:navigationSteps,screen:current});child.stdin.write('\x1b[B');return;}
    if(navigation.action==='accept'){termsAcceptanceSent=true;acceptScreenVersion=screen.version;consentEvidence.push({action:'accept_terms_collection_unchecked',screen:current});child.stdin.write('\r');return;}
    // Full modal is now readable, but no focused accept control has been proved.
-   consentBlocked=true;consentEvidence.push({action:'stop_accept_control_unverified',screen:current});child.stdin.write('\x03');child.stdin.end();clearInterval(compactPoll);return;
+   consentBlocked=true;consentEvidence.push({action:'stop_accept_control_unverified',screen:current});child.kill('SIGTERM');clearInterval(compactPoll);return;
   }
   return;
  }

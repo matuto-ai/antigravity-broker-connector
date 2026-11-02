@@ -22,3 +22,5 @@ test('unfocused Done, multiple markers, checked collection, changed controls and
 test('terms disappearance still cannot send a command into a trust or login modal',()=>{
  for(const value of ['Trust this folder?','Log in','> '])assert.equal(postConsentState(value).maySendCommand,false);
 });
+
+test('actual focused Previous renders without brackets and still allows only Down',()=>{const screens=JSON.parse(readFileSync(new URL('./recorded-navigation-screens.json',import.meta.url),'utf8'));const state=consentState(screens.at(-1).screen);assert(state.selectedPrevious);assert(state.unchecked);assert.equal(consentNavigation(state,'checkbox',1).action,'down');assert.equal(state.mayAccept,false);const done=screens.at(-1).screen.replace('>  Previous       [Done]','   [Previous]    > Done');assert.equal(consentNavigation(consentState(done),'previous',2).action,'accept');});

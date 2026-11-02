@@ -7,9 +7,9 @@ export function consentState(screen) {
  const focusedChecked=/^\s*>\s*\[x\] Yes, I agree to help improve Antigravity CLI by allowing\b/mi.test(screen);
  const focusCount=(screen.match(/>/g)??[]).length;
  const focusedUnchecked=/^[ \t]*>[ \t]*\[ \] Yes, I agree to help improve Antigravity CLI by allowing\b/m.test(screen);
- const selectedPrevious=/(?:^|[ \t])>[ \t]*\[Previous\]/m.test(screen);
- const selectedDone=/(?:^|[ \t])>[ \t]*\[Done\]/m.test(screen);
- const nativeButtons=screen.includes('[Previous]')&&screen.includes('[Done]');
+ const selectedPrevious=/(?:^|[ \t])>[ \t]*(?:\[Previous\]|Previous)(?=[ \t]|$)/m.test(screen);
+ const selectedDone=/(?:^|[ \t])>[ \t]*(?:\[Done\]|Done)(?=[ \t]|$)/m.test(screen);
+ const nativeButtons=(screen.includes('[Previous]')||selectedPrevious)&&(screen.includes('[Done]')||selectedDone);
  const arrowNavigation=screen.includes('↑/↓ Navigate');
  const selectedAccept=/^\s*>\s*(?:Accept|Accept and continue)\s*$/mi.test(screen);
  return {focusCount,terms,checked,unchecked,focusedChecked,focusedUnchecked,selectedPrevious,selectedDone,nativeButtons,arrowNavigation,selectedAccept,

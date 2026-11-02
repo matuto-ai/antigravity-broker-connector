@@ -15,7 +15,7 @@ tar -xzf "$tmp/cli.tgz" -C "$tmp" antigravity
 chmod 755 "$tmp" "$tmp/antigravity"
 fixture="$tmp/fixture"
 mkdir -p "$fixture/xterm-pinned"
-for file in worker.mjs consent-state-navigation.mjs consent-navigation.test.mjs recorded-consent-screens.json xterm-screen.mjs consent-state.mjs xterm-screen.test.mjs consent-state.test.mjs recorded-terminal.json xterm-integrity.json; do cp "$root/$file" "$fixture/$file"; done
+for file in worker.mjs consent-state-navigation.mjs consent-navigation.test.mjs recorded-consent-screens.json recorded-navigation-screens.json xterm-screen.mjs consent-state.mjs xterm-screen.test.mjs consent-state.test.mjs recorded-terminal.json xterm-integrity.json; do cp "$root/$file" "$fixture/$file"; done
 curl --fail --location --max-time 120 https://registry.npmjs.org/@xterm/headless/-/headless-6.0.0.tgz -o "$tmp/xterm.tgz"
 node --input-type=module - "$tmp/xterm.tgz" <<'NODE'
 import {readFileSync} from 'node:fs';import {createHash} from 'node:crypto';
