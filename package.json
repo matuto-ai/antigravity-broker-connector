@@ -1,6 +1,6 @@
 {
   "name": "@matuto-ai/antigravity-broker-connector",
-  "version": "0.4.1",
+  "version": "0.5.1",
   "type": "module",
   "engines": {
     "node": ">=24.19.0 <25"
@@ -8,7 +8,9 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "check": "find src bin test vendor scripts -name \"*.mjs\" -print0 | xargs -0 -r -n1 node --check",
-    "test:pack": "node scripts/pack-smoke.mjs"
+    "test:pack": "node scripts/pack-smoke.mjs",
+    "test:local": "node scripts/test-stage.mjs local",
+    "test:integration": "node scripts/test-stage.mjs integration"
   },
   "license": "MIT",
   "description": "Native Antigravity Psst setup and conversation messaging with private administrator-approved installation credentials.",

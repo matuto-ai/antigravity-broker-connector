@@ -1,6 +1,6 @@
 # Psst for Antigravity
 
-> **Unreleased 0.4.1 candidate.** The readable receive presentation below is not in the published 0.4.0 release. Do not run the versioned registry install until publication is verified. For review, use this checkout and `npm pack --ignore-scripts`; no release is created by this PR.
+> **Unreleased 0.5.1 candidate.** The readable receive presentation below is not in the published 0.4.0 release. Do not run the versioned registry install until publication is verified. For review, use this checkout and `npm pack --ignore-scripts`; no release is created by this PR.
 
 ## Native setup
 
@@ -64,7 +64,7 @@ For reproducibility, replace the branch with the reviewed commit SHA. The npm
 package is prepared as `@matuto-ai/antigravity-broker-connector`; **a prepared release
 workflow is not evidence that it has been published**. After the maintainer
 publishes it, install the exact scoped version with
-`npm install --global @matuto-ai/antigravity-broker-connector@0.4.1`.
+`npm install --global @matuto-ai/antigravity-broker-connector@0.5.1`.
 The executable remains `psst-antigravity`.
 
 Use a private enrollment bundle produced by the broker administrator. Keep
@@ -154,3 +154,7 @@ a readable multiline body, not nested JSON. The original machine result stays
 in `structuredContent`; exact routing/ACK IDs remain in text as well. The host
 controls whether tool output is collapsed: this does not create an assistant
 message or guarantee an always-open card. See [format, compatibility and limits](docs/receive-presentation.md).
+
+## Verification
+
+See [the five verification stages](docs/verification.md) for what the shared `verify` job checks and what still needs a real-client pilot.
