@@ -1,0 +1,33 @@
+// Test-only. Must run in a Docker --network none container, never on a user host.
+import assert from 'node:assert/strict';
+import {networkInterfaces} from 'node:os';
+import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
+import {createServer} from 'node:http';
+import {spawn} from 'node:child_process';
+// Fail before native binary startup if the required isolation is absent.
+assert.deepEqual(Object.keys(networkInterfaces()).filter(name=>name!=='lo'),[],'non-loopback network interface');
+for(const line of readFileSync('/proc/net/route','utf8').trim().split('\n').slice(1))assert.equal(line.trim().split(/\s+/)[0],'lo','external IPv4 route');
+for(const line of readFileSync('/proc/net/ipv6_route','utf8').trim().split('\n').filter(Boolean))assert.equal(line.trim().split(/\s+/).at(-1),'lo','external IPv6 route');
+assert.equal(process.env.HOME,'/tmp/proof-home');
+const home='/tmp/proof-home',root='/tmp/proof';mkdirSync(root,{mode:0o700});mkdirSync(home+'/.gemini/antigravity-cli',{recursive:true,mode:0o700});mkdirSync(home+'/.gemini/config',{recursive:true,mode:0o700});
+const capture=root+'/mcp-meta.jsonl',events=root+'/hook-events.jsonl';
+writeFileSync(root+'/mcp.mjs',`import{createInterface}from'node:readline';import{appendFileSync}from'node:fs';for await(const l of createInterface({input:process.stdin})){const r=JSON.parse(l);let result;if(r.method==='initialize')result={protocolVersion:'2025-06-18',capabilities:{tools:{}},serverInfo:{name:'offline-proof',version:'1'}};else if(r.method==='tools/list')result={tools:[{name:'fixture_identity',description:'Read-only synthetic identity probe. No files, credentials or network accessed.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},_meta:{'antigravity/alwaysLoad':true}}]};else if(r.method==='tools/call'){appendFileSync(${JSON.stringify(capture)},JSON.stringify({name:r.params.name,meta:r.params._meta})+'\\n');result={content:[{type:'text',text:'OFFLINE_MCP_OK'}]};}else if(r.id===undefined)continue;else result={};console.log(JSON.stringify({jsonrpc:'2.0',id:r.id,result}));}`);
+writeFileSync(root+'/hook.mjs',`import{appendFileSync}from'node:fs';let text='';for await(const c of process.stdin){text+=c;if(text.length>131072)throw Error('oversize');}const x=JSON.parse(text);appendFileSync(${JSON.stringify(events)},JSON.stringify({event:process.argv[2],keys:Object.keys(x),conversationId:x.conversationId,toolName:x.toolCall?.name,environmentConversationId:process.env.ANTIGRAVITY_CONVERSATION_ID})+'\\n');console.log(JSON.stringify(process.argv[2]==='PreToolUse'?{decision:'allow'}:{}));`);
+const hooks={};for(const event of ['SessionStart','PreInvocation'])hooks[event]=[{type:'command',command:`node ${root}/hook.mjs ${event}`,timeout:5}];hooks.PreToolUse=[{matcher:'^call_mcp_tool$|^mcp_fixture_fixture_identity$',hooks:[{type:'command',command:`node ${root}/hook.mjs PreToolUse`,timeout:5}]}];
+writeFileSync(home+'/.gemini/config/hooks.json',JSON.stringify({'offline-contract':hooks}));
+writeFileSync(home+'/.gemini/config/mcp_config.json',JSON.stringify({mcpServers:{fixture:{command:'node',args:[root+'/mcp.mjs']}}}));
+let toolSent=false;const requests=[];
+const provider=createServer(async(req,res)=>{if(requests.length>=20){res.writeHead(429);res.end();return;}let b='';for await(const c of req){b+=c;if(b.length>2097152){res.writeHead(413);res.end();return;}}const input=JSON.parse(b||'{}');requests.push({path:req.url,hasTools:Array.isArray(input.tools)});let response;
+ if(req.url.toLowerCase().includes('counttokens'))response={totalTokens:1};
+ else {const eligible=input.tools?.some(t=>t.functionDeclarations?.some(f=>f.name==='mcp_fixture_fixture_identity'));const parts=eligible&&!toolSent?(toolSent=true,[{functionCall:{name:'mcp_fixture_fixture_identity',args:{toolSummary:'Synthetic identity probe'}}}]):[{text:'OFFLINE_PROBE_FINISHED'}];response={candidates:[{content:{role:'model',parts},finishReason:'STOP'}],usageMetadata:{promptTokenCount:1,candidatesTokenCount:1,totalTokenCount:2}};}
+ const sse=req.url.includes('alt=sse');res.writeHead(200,{'content-type':sse?'text/event-stream':'application/json'});res.end(sse?'data: '+JSON.stringify(response)+'\n\n':JSON.stringify(req.url.toLowerCase().includes('streamgenerate')?[response]:response));});
+await new Promise(resolve=>provider.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${provider.address().port}`;
+writeFileSync(home+'/.gemini/antigravity-cli/settings.json',JSON.stringify({modelProvider:'gemini',model:'fixture',customModelsConfig:{customModels:{fixture:{modelName:'gemini-api://offline-fixture/models/fixture',label:'fixture',apiProvider:'API_PROVIDER_GOOGLE_GEMINI',toolFormatterType:'TOOL_FORMATTER_TYPE_NONE'}}}}));
+const child=spawn('/native/antigravity',['--model','fixture','--print','Run the synthetic read-only MCP probe once, then stop.','--output-format','json','--print-timeout','20s'],{cwd:root,env:{HOME:home,PATH:'/usr/local/bin:/usr/bin:/bin',TMPDIR:'/tmp',GEMINI_API_KEY:'offline-fixture-only',GOOGLE_GEMINI_BASE_URL:url},stdio:['ignore','pipe','pipe']});let out='',err='';child.stdout.on('data',b=>{out+=b;if(out.length>65536)child.kill('SIGKILL');});child.stderr.on('data',b=>{err+=b;if(err.length>65536)child.kill('SIGKILL');});const timer=setTimeout(()=>child.kill('SIGKILL'),30000);const code=await new Promise(resolve=>child.once('close',resolve));clearTimeout(timer);provider.close();
+const mcp=existsSync(capture)?readFileSync(capture,'utf8').trim().split('\n').map(JSON.parse):[];const hook=existsSync(events)?readFileSync(events,'utf8').trim().split('\n').map(JSON.parse):[];
+let nativeResult;try{nativeResult=JSON.parse(out.trim());}catch{}
+const rootId=mcp[0]?.meta?.['antigravity.google/root_conversation_id'];const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const metadataVerified=mcp.length===1&&mcp[0].name==='fixture_identity'&&typeof rootId==='string'&&uuid.test(rootId)&&rootId===nativeResult?.conversation_id&&hook.some(h=>h.event==='SessionStart'&&h.conversationId===rootId&&h.environmentConversationId===rootId);
+console.log(JSON.stringify({isolation:'loopback-only',nativeExit:code,requests,hook,mcp,result:out.slice(-6000),error:err.slice(-2000),acceptance:metadataVerified?'native_root_metadata_verified':'native_root_metadata_unverified'}));
+// This qualification observes normal policy; it must never grant permission to force success.
+assert.equal(code,0,'native fixture failed');assert(metadataVerified,'native root metadata not verified; inspect normal permission result, do not bypass');

@@ -39,6 +39,7 @@ jobs:
         run: |
           npm run test:integration
           bash scripts/validate-official-native.sh
+          bash scripts/native-contract-proof/run.sh
         working-directory: antigravity-review-pair
       - name: Verify container persistence
         run: node scripts/container-persistence.mjs
