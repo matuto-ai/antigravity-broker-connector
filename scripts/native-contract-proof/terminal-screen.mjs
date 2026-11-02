@@ -10,7 +10,15 @@ export class TerminalScreen {
    if(c==='\x1b'){
     if(i+1>=this.pending.length)break;
     const next=this.pending[i+1];
-    if(next==='['){const rest=this.pending.slice(i+2),match=/^([0-?]*)([ -/]*)([@-~])/.exec(rest);if(!match)break;if(match[2] && !(match[2]===' '&&match[3]==='q'))this.fail();const params=match[1],final=match[3],n=params.replace(/^\?/,'').split(';').map(x=>Number(x)||0),v=n[0]||1;i+=2+match[0].length;
+    if(next==='['){const rest=this.pending.slice(i+2),match=/^([0-?]*)([ -/]*)([@-~])/.exec(rest);if(!match)break;if(match[2] && !(match[2]===' '&&match[3]==='q') && !(match[2]==='$'&&match[3]==='p'&&/^\?202[67]$/.test(match[1])))this.fail();const params=match[1],final=match[3],n=params.replace(/^\?/,'').split(';').map(x=>Number(x)||0),v=n[0]||1;i+=2+match[0].length;
+     // Exact observed non-rendering queries/input modes; documented by xterm and kitty.
+     // https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+     // https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+     if((final==='q'&&params==='>'&&!match[2]) || (final==='p'&&match[2]==='$'&&/^\?202[67]$/.test(params)) || (final==='u'&&['>1','?'].includes(params)) || (final==='m'&&['>4','>4;2'].includes(params)))continue;
+     // DECST8C resets to columns 9,17,...; these are already the only supported
+     // tab stops. Any command changing them to another configuration is rejected.
+     if(final==='W'&&params==='?5'&&!match[2])continue;
+     if(/[<=>?]/.test(params)&&!((final==='h'||final==='l')&&['?25','?1049','?2004','?1004'].includes(params)))this.fail();
      if(final==='A')this.row=Math.max(0,this.row-v);else if(final==='B')this.row=Math.min(this.rows-1,this.row+v);else if(final==='C')this.col=Math.min(this.columns-1,this.col+v);else if(final==='D')this.col=Math.max(0,this.col-v);
      else if(final==='E'){this.row=Math.min(this.rows-1,this.row+v);this.col=0;}else if(final==='F'){this.row=Math.max(0,this.row-v);this.col=0;}
      else if(final==='G')this.col=Math.min(this.columns-1,v-1);else if(final==='d')this.row=Math.min(this.rows-1,v-1);

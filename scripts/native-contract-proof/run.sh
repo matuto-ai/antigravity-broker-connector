@@ -2,6 +2,7 @@
 # Qualification only: pull pinned artifacts, then execute native CLI with NO network.
 set -euo pipefail
 root="$(cd "$(dirname "$0")" && pwd)"
+node --test "$root/terminal-screen.test.mjs" "$root/consent-state.test.mjs"
 tmp="$(mktemp -d)"
 name="psst-agy-offline-$(date +%s)-$$"
 cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; rm -rf "$tmp"; }
