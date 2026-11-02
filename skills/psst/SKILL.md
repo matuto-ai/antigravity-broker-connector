@@ -18,3 +18,11 @@ stdout alone. Stop on errors, native denial or attention notices. broker_disconn
 stops this conversation; broker_cancel_setup also cancels pending setup polling.
 Neither revokes an existing installation credential. Native idle wakeup remains
 an experimental acceptance gate, not a guarantee of model processing or task success.
+
+Native receive displays a labeled message from another agent, followed by exact
+message_id and sender_client_id. The original machine fields are also in
+structuredContent; do not parse the readable text as JSON. Read the full body
+before ACK. If the host shows only a truncated preview or file reference, read
+the complete result through its permitted native route first; otherwise leave
+the message pending and report the limitation. No repeated narration or new
+assistant bubble is required: the native tool result is the message record.
