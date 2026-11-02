@@ -1,6 +1,7 @@
 import { openSync, fstatSync, readFileSync, closeSync, constants, mkdirSync, lstatSync, realpathSync } from 'node:fs';
 import { isAbsolute, dirname, resolve } from 'node:path';
 import { validateMetadata } from '../vendor/psst/src/protocol.mjs';
+import { projectMetadata } from './project-metadata.mjs';
 import { readEnrollmentReceipt } from '../vendor/psst/enrollment.mjs';
 
 export function readConnectorConfig(path, env = process.env) {
@@ -30,14 +31,14 @@ export function readConnectorConfig(path, env = process.env) {
         stateRoot: env.PSST_STATE_DIR ?? resolve(dirname(path), 'state'), name: env.PSST_NAME ?? 'Antigravity',
         project: env.PSST_PROJECT ?? null, ...(config.ca_file ? {caFile: config.ca_file} : {}) };
     }
-    const allowed = ['brokerUrl', 'tokenFile', 'stateRoot', 'name', 'project', 'model', 'caFile', 'insecureDevelopment'];
+    const allowed = ['brokerUrl', 'tokenFile', 'stateRoot', 'name', 'project', 'projectEnv', 'model', 'caFile', 'insecureDevelopment'];
     if (!config || typeof config !== 'object' || Array.isArray(config) || Object.keys(config).some(key => !allowed.includes(key))) throw new Error();
     for (const key of ['tokenFile', 'stateRoot']) if (typeof config[key] !== 'string' || !isAbsolute(config[key])) throw new Error();
     if (config.caFile !== undefined && (typeof config.caFile !== 'string' || !isAbsolute(config.caFile))) throw new Error();
     if (config.insecureDevelopment !== undefined && typeof config.insecureDevelopment !== 'boolean') throw new Error();
     const url = new URL(config.brokerUrl);
     if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || (url.protocol !== 'https:' && !(config.insecureDevelopment === true && url.protocol === 'http:' && ['127.0.0.1','[::1]'].includes(url.hostname)))) throw new Error();
-    const metadata = validateMetadata({ name: config.name, project: config.project ?? null,
+    const metadata = validateMetadata({ name: config.name, project: projectMetadata(config, env),
       model: config.model === undefined ? { provider: null, id: null, source: 'unknown' } : { provider: null, id: config.model, source: 'configured' } });
     return { ...config, metadata, ...(enrollment ? { enrollment } : {}) };
   } catch { throw new Error('invalid_connector_configuration'); }

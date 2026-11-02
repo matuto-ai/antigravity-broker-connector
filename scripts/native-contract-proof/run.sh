@@ -13,6 +13,6 @@ curl --fail --location --max-time 120 https://storage.googleapis.com/antigravity
 printf '%s  %s\n' 'beda760587589f5827b0b516c3ec2c5bd5cd2e91eb0e2533807ba1e990a27dcd63aef0191e0b76fb60feab0d16eaa8210fb79842c34dd4809e257e1712edd152' "$tmp/cli.tgz" | sha512sum --check --status
 tar -xzf "$tmp/cli.tgz" -C "$tmp" antigravity
 chmod 755 "$tmp" "$tmp/antigravity"
-for mode in root child compact; do
+for mode in root child lazy compact; do
 timeout 50s docker run --rm --name "$name" --network none --user 1000:1000 --read-only --memory 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m --mount "type=bind,src=$tmp/antigravity,dst=/native/antigravity,readonly" --mount "type=bind,src=$root/worker.mjs,dst=/fixture/worker.mjs,readonly" -e HOME=/tmp/proof-home "$image" node /fixture/worker.mjs "$mode"
 done

@@ -4,8 +4,10 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { serveNativePlugin, hookDecision, NATIVE_SERVER, waiterCommand } from '../src/native-plugin.mjs';
+import { serveNativePlugin, handleNativeHook, hookDecision, NATIVE_SERVER, waiterCommand, approvalWaiterCommand } from '../src/native-plugin.mjs';
 import { processIdentity, NativeBinding } from '../src/native-binding.mjs';
 import { waitNativeProcess } from '../src/native-process-waiter.mjs';
 import { httpFixture, registration, sendBody } from '../../ai-agent-msg-broker/test/helpers.mjs';
@@ -51,7 +53,7 @@ test('gated native wiring: disconnected start, hook permits, HTTP FIFO, waiter n
   const received=await nativeCall('broker_receive');assert.equal(received.message_id,sent.body.message_id);
   await ask('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'native-receive-fixture',version:'1'}},1);await ask('notifications/initialized',{});
   const shown=await ask('tools/call',{name:'broker_receive',arguments:server.binding.issue({context,tool:'broker_receive',args:{}})},2);
-  assert.deepEqual(shown.result.structuredContent,received);assert.match(shown.result.content[0].text,/^Psst · mensagem de outro agente/);assert.match(shown.result.content[0].text,/\n    synthetic untrusted inbox text/);
+  assert.deepEqual(shown.result.structuredContent,received);assert.match(shown.result.content[0].text,/^Psst · new message/);assert.match(shown.result.content[0].text,/\n    synthetic untrusted inbox text/);
   await nativeCall('broker_acknowledge',{message_id:received.message_id});
   assert.equal((await nativeCall('broker_receive')).message,null);
   await nativeCall('broker_disconnect');assert.match(await silent,/disconnected/);
@@ -98,4 +100,39 @@ test('MCP EOF/restart preserves conversation fence, rejects concurrent owner and
  assert.throws(()=>second.binding.issue({context:{...context,conversationId:randomUUID()},tool:'broker_connect',args:{connection_file:'/fixture'}}));
  const replacement=await call(second,'broker_connect',{connection_file:'/fixture'});
  assert.notEqual(replacement.client_id,original.client_id);
+});
+
+test('unrelated PreToolUse calls explicitly delegate without binding, mutation or permission overrides',()=>{
+ const directory='/synthetic/psst-owner';
+ const binding={issue(){assert.fail('unrelated calls must not issue Psst permits');}};
+ const calls=[
+  {name:'run_command',args:{CommandLine:'echo fixture'}},
+  {name:'call_mcp_tool',args:{ServerName:'other_server',ToolName:'broker_identity',Arguments:{}}},
+ ];
+ for(const toolCall of calls){
+  const input={conversationId:randomUUID(),toolCall},before=structuredClone(input);
+  assert.deepEqual(hookDecision({input,binding,directory}),{decision:'allow'});
+  // An impossible parent proves unrelated calls do not depend on native Psst state.
+  assert.deepEqual(handleNativeHook(input,{parentPid:-1,base:'/nonexistent/psst-fixture',env:{}}),{decision:'allow'});
+  const stdout=execFileSync(process.execPath,[fileURLToPath(new URL('../bin/psst-antigravity-native.mjs',import.meta.url)),'hook'],{input:JSON.stringify(input),encoding:'utf8',timeout:5000});
+  assert.deepEqual(JSON.parse(stdout),{decision:'allow'});
+  assert.deepEqual(input,before);
+ }
+});
+
+test('Psst calls still deny invalid bindings while unrelated pass-through never approves them',()=>{
+ const directory='/synthetic/psst-owner';
+ const binding={issue(){throw Error('synthetic_rejected_binding');}};
+ const calls=[
+  {name:'call_mcp_tool',args:{ServerName:NATIVE_SERVER,ToolName:'broker_identity',Arguments:{}}},
+  {name:'call_mcp_tool',args:{ServerName:NATIVE_SERVER,ToolName:'broker_setup_status',Arguments:{}}},
+  {name:'run_command',args:{CommandLine:waiterCommand(directory)}},
+  {name:'run_command',args:{CommandLine:approvalWaiterCommand(directory)}},
+ ];
+ for(const toolCall of calls){
+  const result=hookDecision({input:{toolCall},binding,directory});
+  assert.equal(result.decision,'deny');
+  assert.equal(Object.hasOwn(result,'permissionOverrides'),false);
+  assert.equal(Object.hasOwn(result,'overwrite'),false);
+ }
 });
