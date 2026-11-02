@@ -7,7 +7,7 @@ const files = directory => readdirSync(new URL(`../${directory}/`, import.meta.u
 const integrationNames = new Set([
   'adapter', 'approval-tls', 'connector', 'launcher', 'lifecycle-drain',
   'lifecycle-stdio', 'native-mcp', 'native-persistence', 'native-plugin',
-  'native-proof', 'native-setup', 'native-metadata', 'receive-presentation',
+  'native-owner-retention', 'native-retention', 'native-retention-boundaries', 'native-proof', 'native-setup', 'native-metadata', 'receive-presentation',
 ].map(name => `test/${name}.test.mjs`));
 const all = files('test');
 for (const path of integrationNames) if (!all.includes(path)) throw new Error(`Missing integration test: ${path}`);

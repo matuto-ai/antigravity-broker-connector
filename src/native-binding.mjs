@@ -108,6 +108,7 @@ export class NativeBinding {
       return { conversationId: row.conversation, args: clean };
     });
   }
+  invalidatePermits(){this.transaction(()=>{this.assertHost();this.db.exec('DELETE FROM permits');});}
   isBound(conversationId) { try { return this.assertHost().conversation===conversationId; } catch { return false; } }
   startOwner(epoch) {
     validateUuid(epoch);

@@ -70,7 +70,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
     binding=new NativeBinding({path,host,create:!existsSync(path)});binding.startOwner(ownerEpoch);
     save(join(directory,'owner.json'),{host,ownerEpoch,connectorProcess:processIdentity(process.pid),server:NATIVE_SERVER});
   } catch {binding?.dispose();ownerLock.close();throw Error('native_owner_unavailable');}
-  const stateFile=join(directory,'session.json');let session,connecting=false,closed=false,epoch=0,attempt,manager,timer,disabled=false;
+  const stateFile=join(directory,'session.json');let session,connecting=false,closed=false,epoch=0,attempt,manager,timer,disabled=false,recoveryBlocked=false;
   try{disabled=readPrivateJson(stateFile).disabled===true;}catch{}
   const installation=openInstallation(installationRoot,configReader);
   const state=()=>save(stateFile,{connected:Boolean(session)&&!closed,disabled,epoch,conversationId:session?.conversationId??null,
@@ -79,7 +79,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
   const controller=new AbortController();
   const disconnect=async()=>{
     epoch++;attempt?.abort();const old=session;session=undefined;let failed=false;
-    try{state();}catch{failed=true;closed=true;controller.abort();try{binding.closeHost();}catch{}}
+    try{binding.invalidatePermits();state();}catch{failed=true;closed=true;controller.abort();try{binding.closeHost();}catch{}}
     try{await old?.close();}finally{if(failed)throw Error('native_state_unavailable');}
   };
   let closing;
@@ -89,12 +89,24 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
     let event;try{event=readPrivateJson(join(directory,'native-event.json'));}catch{}
     return nativeMetadata(config,event,{host,conversationId});
   }
+  async function createSession(options){if(recoveryBlocked)throw Object.assign(Error('native_incarnation_uncertain'),{code:'native_incarnation_uncertain'});try{return await sessionFactory(options);}catch(error){if(error.code==='native_incarnation_uncertain')recoveryBlocked=true;throw error;}}
+  // A confirmed v2 self-expiry may rebuild only this still-selected native owner.
+  async function unavailableCandidate(candidate, reason, {conversationId,file,registrationVersion}) {
+    if(!candidate||closed||session?.identity.client_id!==candidate.identity.client_id||session.conversationId!==conversationId||!binding.isBound(conversationId))return;
+    if(reason?.code==='session_expired'&&reason.conversationId!==conversationId)return;
+    const source=session.source;
+    const recover=registrationVersion===2&&reason?.code==='session_expired'&&reason.conversationId===conversationId;
+    manager?.attention();const expectedEpoch=epoch+1;await disconnect();
+    if(recover&&!closed&&!disabled&&epoch===expectedEpoch&&binding.isBound(conversationId)&&isHostAlive()){
+      recoverySource={conversationId,file,source,expectedEpoch};void tick();
+    }
+  }
   async function prepareApproved(file){
     const conversationId=binding.assertHost().conversation,startedEpoch=epoch;
     if(!conversationId||closed||!isHostAlive())throw Error('native_host_unavailable');
     const config=configReader(file,{});
     const registrationConfig={...config,metadata:observedMetadata(config,conversationId)};
-    let candidate;candidate=await sessionFactory({config:registrationConfig,conversationId,observeMetadata:()=>observedMetadata(config,conversationId),isAlive:()=>isHostAlive()&&binding.isBound(conversationId),signal:controller.signal,onUnavailable:()=>{if(candidate&&session?.identity.client_id===candidate.identity.client_id){manager?.attention();void disconnect().catch(()=>{});}}});
+    let candidate;candidate=await createSession({config:registrationConfig,conversationId,observeMetadata:()=>observedMetadata(config,conversationId),isAlive:()=>isHostAlive()&&binding.isBound(conversationId),signal:controller.signal,onUnavailable:reason=>{void unavailableCandidate(candidate,reason,{conversationId,file,registrationVersion:config.registrationVersion??1}).catch(()=>{});}});
     if(closed||epoch!==startedEpoch){await candidate.close();throw Error('native_host_unavailable');}
     return {...candidate,conversationId,source:{connection_file:file}};
   }
@@ -103,14 +115,21 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
   }
   async function attachApproved(candidate){const staged=await stageApproved(candidate);await staged.finalize();}
   manager=createApprovalManager({installation,api,isAlive:()=>!closed&&isHostAlive(),onStatus:status=>savePrivate(join(directory,'approval.json'),status),activate:{prepare:prepareApproved,commit:stageApproved}});
-  let attemptedRevision,approvalResumed=false,ticking=false;
+  let attemptedRevision,approvalResumed=false,ticking=false,recoverySource;
   async function tick(){
     if(ticking||closed)return;ticking=true;
     try{
       if(!isHostAlive()){await close();return;}
+      if(recoveryBlocked)return;
       if(!binding.assertHost().conversation){try{const event=readPrivateJson(join(directory,'native-event.json'));binding.observe(event);}catch{}}
       if(!binding.assertHost().conversation)return;
       if(installation.sessionDisabled(binding.assertHost().conversation))disabled=true;
+      if(recoverySource&&!session&&!connecting&&!disabled){
+        const recovery=recoverySource;recoverySource=undefined; // One attempt; uncertainty never causes tick churn.
+        if(epoch!==recovery.expectedEpoch||!binding.isBound(recovery.conversationId))return;
+        connecting=true;
+        try{const candidate=await prepareApproved(recovery.file);candidate.source=recovery.source;await attachApproved(candidate);}catch(error){recoveryBlocked=true;throw error;}finally{connecting=false;}
+      }
       if(!session&&!connecting&&!disabled&&manager.status.state!=='pending'){
        const selected=installation.selected();if(selected&&attemptedRevision!==selected.revision){
         attemptedRevision=selected.revision;connecting=true;
@@ -125,7 +144,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
   for(const def of NATIVE_DEFINITIONS)tools[def.name]=async (args,context)=>{
     const verified=binding.consume({tool:def.name,args});
     if(closed||!isHostAlive())throw Error('native_host_unavailable');
-    if(def.name==='broker_setup'){installation.suppressSetup(verified.conversationId,false);installation.setSessionDisabled(verified.conversationId,false);disabled=false;state();const status=await manager.begin(verified.args.broker_url);return {...status,waiter_command:approvalWaiterCommand(directory),automatic_delivery_certified:false};}
+    if(def.name==='broker_setup'){installation.suppressSetup(verified.conversationId,false);installation.setSessionDisabled(verified.conversationId,false);disabled=false;state();const wasRecoveryBlocked=recoveryBlocked;recoveryBlocked=false;recoverySource=undefined;try{const status=await manager.begin(verified.args.broker_url);return {...status,waiter_command:approvalWaiterCommand(directory),automatic_delivery_certified:false};}catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;}}
     if(def.name==='broker_setup_status'){await tick();return {...manager.status,connected:Boolean(session),mode:'automatic_required',readiness:session?'native_wakeup_acceptance_unverified':'not_connected',...(session?{waiter_command:waiterCommand(directory)}:manager.status.state==='pending'?{waiter_command:approvalWaiterCommand(directory)}:{})};}
     if(def.name==='broker_cancel_setup'){installation.suppressSetup(verified.conversationId,true);return manager.cancel();}
     if(def.name==='broker_connect') {
@@ -136,24 +155,26 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
         if(session.source.pairing_file!==a.pairing_file||session.source.connection_file!==a.connection_file)throw Error('disconnect_before_repair');
         return {connected:true,...session.identity,waiter_command:waiterCommand(directory),automatic_delivery_certified:false};
       }
-      connecting=true;
+      const wasRecoveryBlocked=recoveryBlocked;recoveryBlocked=false;recoverySource=undefined;connecting=true;
       const startedEpoch=epoch;attempt=new AbortController();
       try {
         const file=a.connection_file??(await pair({pairingFile:a.pairing_file,directory:join(dirname(base),'installation')})).connectionFile;
         const config=configReader(file,{});
         const registrationConfig={...config,metadata:observedMetadata(config,verified.conversationId)};
         if(closed||epoch!==startedEpoch)throw Error('native_host_unavailable');
-        const candidate=await sessionFactory({config:registrationConfig,conversationId:verified.conversationId,observeMetadata:()=>observedMetadata(config,verified.conversationId),isAlive:isHostAlive,signal:AbortSignal.any([controller.signal,attempt.signal]),
-          onUnavailable:()=>{if(!closed&&(epoch===startedEpoch||epoch===startedEpoch+1))void disconnect().catch(()=>{});}});
+        let candidate;candidate=await createSession({config:registrationConfig,conversationId:verified.conversationId,observeMetadata:()=>observedMetadata(config,verified.conversationId),isAlive:isHostAlive,signal:AbortSignal.any([controller.signal,attempt.signal]),
+          onUnavailable:reason=>{void unavailableCandidate(candidate,reason,{conversationId:verified.conversationId,file,registrationVersion:config.registrationVersion??1}).catch(()=>{});}});
         if(closed||epoch!==startedEpoch){await candidate.close();throw Error('native_host_unavailable');}
         installation.setSessionDisabled(verified.conversationId,false);disabled=false;session={...candidate,conversationId:verified.conversationId,source:a};epoch++;
         try{state();}catch{await disconnect();throw Error('native_state_unavailable');}
         return {connected:true,...session.identity,waiter_command:waiterCommand(directory),automatic_delivery_certified:false};
-      } finally{connecting=false;attempt=undefined;}
+      } catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;} finally{connecting=false;attempt=undefined;}
     }
     if(def.name==='broker_disconnect'){installation.suppressSetup(verified.conversationId,true);installation.setSessionDisabled(verified.conversationId,true);disabled=true;manager.cancel();await disconnect();return {connected:false};}
     if(!session||session.conversationId!==verified.conversationId)throw Error('native_not_connected');
-    return session.tools[def.name](verified.args,context);
+    const admitted=session,admittedEpoch=epoch;const result=await admitted.tools[def.name](verified.args,context);
+    if(closed||epoch!==admittedEpoch||session!==admitted)throw Error('native_session_changed_receipt_retained');
+    return result;
   };
   const stdio=serveStdio({input,output,tools,readableNativeReceive:true,maxReceiveResponseBytes:NATIVE_RECEIVE_RESPONSE_BYTES,definitions:NATIVE_DEFINITIONS,onClose:close,
     instructions:'Psst native automatic waiter delivery. Saved approval reconnects only after native binding. Use broker_setup for explicit URL-only enrollment; approval happens in the broker UI. The native hook supplies __psst_permit. After connection, run waiter_command with native run_command WaitMsBeforeAsync=500 and end the turn. On its notice, receive, read, acknowledge message_id, drain FIFO and re-arm. Retry and receipt keys stay internal. This wakeup route still requires native acceptance verification.'});
