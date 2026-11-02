@@ -185,3 +185,20 @@ the wakeup proof. The pilot adapter must be reviewed before this test:
 Record CLI version, native tool/hook observations and the resulting transcript
 events (not hidden reasoning or secrets). Until this passes, automatic CLI
 delivery remains a gated pilot, not a completed production feature.
+
+
+### Optional registration v2 and expired sessions
+
+Native connection configuration accepts `registrationVersion: 2`; a private
+connection bundle accepts `registration_version: 2`. Omission retains v1. This
+does not change enrollment, credentials or enable broker cleanup. Server v2
+enforcement and retention require a separate operator decision after rollout.
+
+If the broker confirms this exact native conversation's session has expired,
+the connector creates a fresh empty journal and identity. One durable pointer
+selects it on restart. The original owner lock remains held during replacement;
+old uncertain sends, claims and receipts remain in their original journal and
+are never transferred or automatically replayed under the new identity. Storage
+uncertainty stops replacement until deliberate restart/reconciliation. A target
+message404, authorization error or different native conversation is not authority
+to replace a session. Local archived journals are not removed by server retention.
