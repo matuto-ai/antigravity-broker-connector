@@ -2,6 +2,7 @@
 import {prepareActualPluginFixture} from './actual-plugin-fixture.mjs';
 import {actualCompactContinuity,actualRootRotation,matchingIdleStop} from './actual-compact-state.mjs';
 import {presenceProviderStep} from './presence-provider-step.mjs';
+import {waiterProviderStep} from './waiter-provider-step.mjs';
 import {messageProviderStep,MESSAGE_TOOLS} from './message-provider-step.mjs';
 import {actualProviderStep} from './actual-provider-step.mjs';
 import {composerState} from './composer-state.mjs';
@@ -19,15 +20,16 @@ assert.deepEqual(Object.keys(networkInterfaces()).filter(name=>name!=='lo'),[],'
 for(const line of readFileSync('/proc/net/route','utf8').trim().split('\n').slice(1))assert.equal(line.trim().split(/\s+/)[0],'lo','external IPv4 route');
 for(const line of readFileSync('/proc/net/ipv6_route','utf8').trim().split('\n').filter(Boolean))assert.equal(line.trim().split(/\s+/).at(-1),'lo','external IPv6 route');
 assert.equal(process.env.HOME,'/tmp/proof-home');
-const mode=process.argv[2]??'root';assert(['root','compact','new','presence','messages'].includes(mode));
-const interactive=['compact','new'].includes(mode);
+const mode=process.argv[2]??'root';assert(['root','compact','new','presence','messages','idle'].includes(mode));
+const interactive=['compact','new','idle'].includes(mode);
 const home='/tmp/proof-home',root='/tmp/proof';mkdirSync(root,{mode:0o700});mkdirSync(home+'/.gemini/antigravity-cli',{recursive:true,mode:0o700});mkdirSync(home+'/.gemini/config',{recursive:true,mode:0o700});
 assert(lstatSync(root).isDirectory()&&!lstatSync(root).isSymbolicLink()&&realpathSync(root)==='/tmp/proof','fresh_fixture_workspace_required');
-const fixture=await prepareActualPluginFixture({root,home,pluginRoot:'/plugin',brokerRoot:'/psst',tlsDirectory:'/fixture-tls',presence:mode==='presence',messages:mode==='messages'});
+const fixture=await prepareActualPluginFixture({root,home,pluginRoot:'/plugin',brokerRoot:'/psst',tlsDirectory:'/fixture-tls',presence:mode==='presence',messages:['messages','idle'].includes(mode),wakeup:mode==='idle'});
 const events=fixture.eventsFile;
 writeFileSync(home+'/.gemini/config/hooks.json',JSON.stringify(fixture.hooks));
 writeFileSync(home+'/.gemini/config/mcp_config.json',JSON.stringify(fixture.mcp));
 let turn={sent:0,completed:0},presenceState={sent:0,completed:0},presenceProof=null,messageState={sent:0,completed:0},messageProof=null,messageBoundaries=[],providerFailure=null,providerDiagnostics=null;const requests=[],identities=[],snapshots=[];
+let waiterState={sent:0,completed:0},rearmState={sent:0,completed:0},idleSeeded=false,idleStopped=false,rearmStopped=false,waiterProcesses=[];
 function snapshot(identity){
  const base=home+'/.config/psst/antigravity/native';
  const owners=readdirSync(base).map(name=>base+'/'+name).filter(path=>existsSync(path+'/owner.json'));
@@ -72,13 +74,19 @@ const provider=createServer(async(req,res)=>{if(requests.length>=20){res.writeHe
  else {let parts;
  try {
   let step;
-  if(mode==='messages'&&turn.completed===2){step=messageProviderStep(input,messageState,messageProof);const advanced=step.state.completed>messageState.completed;messageState=step.state;if(advanced)recordMessageBoundary();}
+  if(mode==='idle'&&turn.completed===2){
+   if(waiterState.completed===0){step=waiterProviderStep(input,waiterState,turn.waiterCommand);waiterState=step.state;}
+   else if(messageState.completed<MESSAGE_TOOLS.length){assert(idleSeeded&&messageProof,'unsolicited wake must follow actual stopped-turn waiter and durable arrival');step=messageProviderStep(input,messageState,messageProof);const advanced=step.state.completed>messageState.completed;messageState=step.state;if(advanced)recordMessageBoundary();}
+   else {step=waiterProviderStep(input,rearmState,turn.waiterCommand);rearmState=step.state;}
+  }
+  else if(mode==='messages'&&turn.completed===2){step=messageProviderStep(input,messageState,messageProof);const advanced=step.state.completed>messageState.completed;messageState=step.state;if(advanced)recordMessageBoundary();}
   else if(mode==='presence'&&turn.completed===2){step=presenceProviderStep(input,presenceState,presenceProof);presenceState=step.state;}
   else {step=actualProviderStep(input,turn);turn=step.state;}
   parts=step.parts;
   if(step.identity){
    identities.push(step.identity);snapshots.push(snapshot(step.identity));
    if(mode==='presence'){presenceProof=fixture.seedPresence(step.identity.client_id);const next=presenceProviderStep(input,presenceState,presenceProof);presenceState=next.state;parts=next.parts;}
+   if(mode==='idle'){const next=waiterProviderStep(input,waiterState,turn.waiterCommand);waiterState=next.state;parts=next.parts;}
    if(mode==='messages'){messageProof=fixture.seedMessages(step.identity.client_id);await waitForInbound();const next=messageProviderStep(input,messageState,messageProof);messageState=next.state;parts=next.parts;}
   }
  } catch(error){providerFailure=error.message;providerDiagnostics={response:error.proofDiagnostics??null,nativeState:diagnosticNativeState()};parts=[{text:'OFFLINE_ACTUAL_PROOF_FAILED'}];}
@@ -87,8 +95,10 @@ const provider=createServer(async(req,res)=>{if(requests.length>=20){res.writeHe
  const sse=req.url.includes('alt=sse');res.writeHead(200,{'content-type':sse?'text/event-stream':'application/json'});res.end(sse?'data: '+JSON.stringify(response)+'\n\n':JSON.stringify(req.url.toLowerCase().includes('streamgenerate')?[response]:response));});
 await new Promise(resolve=>provider.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${provider.address().port}`;
 writeFileSync(home+'/.gemini/antigravity-cli/settings.json',JSON.stringify({permissions:fixture.permissions,colorScheme:'terminal',modelProvider:'gemini',model:'fixture',customModelsConfig:{customModels:{fixture:{modelName:'gemini-api://offline-fixture/models/fixture',label:'fixture',apiProvider:'API_PROVIDER_GOOGLE_GEMINI',toolFormatterType:'TOOL_FORMATTER_TYPE_NONE'}}}}));
+const idlePrompt='Read broker_setup_status then broker_identity, arm its waiter_command with run_command WaitMsBeforeAsync=500 and end the turn. For an automatic Psst notice, run the exact disposable message fixture and re-arm. Do not run other commands.';
 const messagePrompt='Use call_mcp_tool for broker_setup_status and broker_identity, then the exact disposable message fixture: broker_send once, broker_receive twice, broker_acknowledge twice for that received ID, and broker_receive to verify empty. Do not run commands or other tools.';
-const nativeArgs=['--model','fixture','--print',mode==='messages'?messagePrompt:'Read broker_setup_status then broker_identity using call_mcp_tool, then stop. Do not run commands or other tools.','--output-format','json','--print-timeout','20s'];const child=spawn(interactive?'script':'/native/antigravity',interactive?['-q','-e','-c',"stty cols 120 rows 40; /native/antigravity --model fixture --prompt-interactive 'Read broker_setup_status then broker_identity using call_mcp_tool, then stop. Do not run commands or other tools.'",'/dev/null']:nativeArgs,{cwd:root,env:{HOME:home,PATH:'/usr/local/bin:/usr/bin:/bin',TMPDIR:'/tmp',GEMINI_API_KEY:'offline-fixture-only',GOOGLE_GEMINI_BASE_URL:url,TERM:'xterm-256color'},stdio:[interactive?'pipe':'ignore','pipe','pipe']});const screen=new TerminalScreen(120,40);let lastScreenChange=Date.now(),previousScreen='';let out='',err='',overflow=false,timedOut=false,parserFailed=false;child.stdout.on('data',b=>{lastScreenChange=Date.now();out+=b;if(out.length>65536){overflow=true;child.kill('SIGKILL');return;}try{screen.write(b).catch(error=>{parserFailed=true;err+='terminal_parser_failed:'+error.message;child.kill('SIGKILL');});}catch(error){parserFailed=true;err+='terminal_parser_failed:'+error.message;child.kill('SIGKILL');return;}const current=screen.text();if(current!==previousScreen)previousScreen=current;});child.stderr.on('data',b=>{lastScreenChange=Date.now();err+=b;if(err.length>65536){overflow=true;child.kill('SIGKILL');}});let collectionToggleSent=false,collectionUnchecked=false,termsAccepted=false,termsAcceptanceSent=false,consentBlocked=false,acceptScreenVersion=0;const consentEvidence=[];let trustConfirmationSent=false,trustPromptDismissed=false,trustScreenVersion=-1,trustSentAt=0;let navigationSteps=0,navigationFocus=null,navigationVersion=-1,navigationSentAt=0;let themeSelected=false,compactIssued=false,probeIssued=false,stoppedAfterCompact=false;let commandVersion=-1,probeHookStart=-1;const compactTimers=[];
+const nativeArgs=['--model','fixture','--print',mode==='messages'?messagePrompt:'Read broker_setup_status then broker_identity using call_mcp_tool, then stop. Do not run commands or other tools.','--output-format','json','--print-timeout','20s'];const child=spawn(interactive?'script':'/native/antigravity',interactive?['-q','-e','-c',`stty cols 120 rows 40; /native/antigravity --model fixture --prompt-interactive '${mode==='idle'?idlePrompt:'Read broker_setup_status then broker_identity using call_mcp_tool, then stop. Do not run commands or other tools.'}'`,'/dev/null']:nativeArgs,{cwd:root,env:{HOME:home,PATH:'/usr/local/bin:/usr/bin:/bin',TMPDIR:'/tmp',GEMINI_API_KEY:'offline-fixture-only',GOOGLE_GEMINI_BASE_URL:url,TERM:'xterm-256color'},stdio:[interactive?'pipe':'ignore','pipe','pipe']});const screen=new TerminalScreen(120,40);let lastScreenChange=Date.now(),previousScreen='';let out='',err='',overflow=false,timedOut=false,parserFailed=false;child.stdout.on('data',b=>{lastScreenChange=Date.now();out+=b;if(out.length>65536){overflow=true;child.kill('SIGKILL');return;}try{screen.write(b).catch(error=>{parserFailed=true;err+='terminal_parser_failed:'+error.message;child.kill('SIGKILL');});}catch(error){parserFailed=true;err+='terminal_parser_failed:'+error.message;child.kill('SIGKILL');return;}const current=screen.text();if(current!==previousScreen)previousScreen=current;});child.stderr.on('data',b=>{lastScreenChange=Date.now();err+=b;if(err.length>65536){overflow=true;child.kill('SIGKILL');}});let collectionToggleSent=false,collectionUnchecked=false,termsAccepted=false,termsAcceptanceSent=false,consentBlocked=false,acceptScreenVersion=0;const consentEvidence=[];let trustConfirmationSent=false,trustPromptDismissed=false,trustScreenVersion=-1,trustSentAt=0;let navigationSteps=0,navigationFocus=null,navigationVersion=-1,navigationSentAt=0;let themeSelected=false,compactIssued=false,probeIssued=false,stoppedAfterCompact=false;let commandVersion=-1,probeHookStart=-1;const compactTimers=[];
+function activeWaiters(){let count=0;for(const pid of readdirSync('/proc').filter(n=>/^[0-9]+$/.test(n))){try{const args=readFileSync('/proc/'+pid+'/cmdline','utf8').split('\0');if(args[1]==='/plugin/bin/psst-antigravity-native.mjs'&&args[2]==='wait')count++;}catch{}}return count;}
 const compactPoll=interactive?setInterval(()=>{
  const current=screen.text();if(parserFailed||overflow||timedOut||!screen.complete||Date.now()-Math.max(lastScreenChange,screen.lastParsedAt)<250)return;
  if(!themeSelected&&current.includes('Choose your color scheme:')&&/^\s*> terminal(?:\s|$)/m.test(current)){themeSelected=true;child.stdin.write('\r');return;}
@@ -123,6 +133,16 @@ const compactPoll=interactive?setInterval(()=>{
  if(!termsAccepted||screen.version<=acceptScreenVersion||consent.terms)return;
  if(!trustPromptDismissed||!composerState(current).ready)return;
  const observed=fixture.readEvents();
+ if(mode==='idle'){
+  const stopped=observed.filter(h=>h.event==='Stop'&&h.fullyIdle===false&&h.conversationId===identities[0]?.conversation_id&&['model_stop','NO_TOOL_CALL'].includes(h.terminationReason));
+  if(!idleSeeded&&waiterState.completed===1&&stopped.length>=1){
+   idleStopped=true;waiterProcesses.push(activeWaiters());assert.equal(waiterProcesses.at(-1),1,'one native waiter must be alive before peer arrival');
+   messageProof=fixture.seedMessages(identities[0].client_id);idleSeeded=true;
+  } else if(idleSeeded&&rearmState.completed===1&&stopped.length>=2&&!rearmStopped){
+   rearmStopped=true;waiterProcesses.push(activeWaiters());assert.equal(waiterProcesses.at(-1),1,'exactly one native waiter re-armed after ACK');child.stdin.write('/exit\r');
+  }
+  return;
+ }
  const stops=observed.filter(h=>h.event==='Stop'&&h.fullyIdle===true&&['model_stop','NO_TOOL_CALL'].includes(h.terminationReason));
  if(!compactIssued&&identities.length===1&&snapshots.length===1&&snapshots[0].admittedRoot===identities[0].conversation_id&&observed.some(h=>h.event==='PreToolUse'&&h.tool==='broker_identity'&&h.conversationId===identities[0].conversation_id&&h.environmentConversationId===h.conversationId&&h.hostPid===snapshots[0].host.pid&&h.hostStart===snapshots[0].host.start)&&stops.some(h=>h.conversationId===identities[0].conversation_id&&h.environmentConversationId===h.conversationId&&h.hostPid===snapshots[0].host.pid&&h.hostStart===snapshots[0].host.start)){compactIssued=true;commandVersion=screen.version;child.stdin.write(mode==='new'?'/new\r':'/compact\r');}
  else if(compactIssued&&!probeIssued&&(mode==='compact'?current.includes('Conversation compacted'):screen.version>commandVersion)){probeIssued=true;probeHookStart=observed.length;turn={sent:0,completed:0};child.stdin.write('Read broker_setup_status then broker_identity after the native command, then stop. No other tools.\r');}
@@ -132,14 +152,16 @@ const timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL');},30000);const c
 const hook=fixture.readEvents();
 if(mode==='presence'&&!providerFailure&&presenceState.completed===2)fixture.verifyPresenceAck(presenceProof);
 await fixture.close();
-const expected=interactive?2:1;
+const expected=['compact','new'].includes(mode)?2:1;
 const presenceVerified=mode!=='presence'||presenceState.completed===2;
-const messagesVerified=mode!=='messages'||messageState.completed===MESSAGE_TOOLS.length&&messageBoundaries.length===MESSAGE_TOOLS.length;
+const messagesVerified=!['messages','idle'].includes(mode)||messageState.completed===MESSAGE_TOOLS.length&&messageBoundaries.length===MESSAGE_TOOLS.length;
 const actualVerified=messagesVerified&&presenceVerified&&!providerFailure&&identities.length===expected&&snapshots.length===expected&&hook.every(h=>!h.denied)&&identities.every(id=>hook.some(h=>h.event==='PreToolUse'&&h.tool==='broker_identity'&&h.conversationId===id.conversation_id&&h.environmentConversationId===id.conversation_id));
-const compactVerified=!interactive||compactIssued&&probeIssued&&stoppedAfterCompact&&(mode==='new'?actualRootRotation(identities,snapshots):actualCompactContinuity(identities,snapshots));
-console.log(JSON.stringify({mode,messagesVerified,messageBoundaries,presenceVerified,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence,terminalScreen:screen.text(),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:err.slice(-2000),acceptance:actualVerified&&compactVerified?(mode==='messages'?'actual_plugin_native_message_context_verified':'actual_plugin_native_identity_verified'):'actual_plugin_native_qualification_unverified'}));
+const compactVerified=!['compact','new'].includes(mode)||compactIssued&&probeIssued&&stoppedAfterCompact&&(mode==='new'?actualRootRotation(identities,snapshots):actualCompactContinuity(identities,snapshots));
+const wakeupVerified=mode!=='idle'||idleSeeded&&idleStopped&&rearmStopped&&waiterState.completed===1&&rearmState.completed===1&&waiterProcesses.length===2&&waiterProcesses.every(n=>n===1);
+console.log(JSON.stringify({mode,wakeupVerified,idleSeeded,idleStopped,rearmStopped,waiterProcesses,messagesVerified,messageBoundaries,presenceVerified,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence,terminalScreen:screen.text(),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:err.slice(-2000),acceptance:actualVerified&&compactVerified?(mode==='messages'?'actual_plugin_native_message_context_verified':'actual_plugin_native_identity_verified'):'actual_plugin_native_qualification_unverified'}));
 assert(!parserFailed&&!timedOut&&!overflow,'native fixture diagnostics failed');
 assert([0,130].includes(code),'native fixture exit');
 assert(actualVerified,'actual plugin native identity unverified; no permission bypass');
 if(interactive)assert(collectionUnchecked&&termsAccepted&&!consentBlocked,'terms/trust unverified');
+assert(wakeupVerified,'actual native idle arrival and re-arm unverified');
 assert(compactVerified,'actual native command continuity or rotation unverified');

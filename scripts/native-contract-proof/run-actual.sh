@@ -19,7 +19,7 @@ tar -xzf "$tmp/cli.tgz" -C "$tmp" antigravity
 chmod 755 "$tmp" "$tmp/antigravity"
 fixture="$tmp/fixture"
 mkdir -p "$fixture/xterm-pinned"
-for file in actual-worker.mjs actual-plugin-fixture.mjs message-provider-step.mjs actual-provider-step.mjs presence-provider-step.mjs presence-provider-step.test.mjs message-provider-step.test.mjs actual-provider-step.test.mjs recorded-actual-envelope.json actual-compact-state.mjs actual-compact-state.test.mjs composer-state.mjs composer-state.test.mjs recorded-composer-screen.json trust-state.mjs trust-state.test.mjs recorded-trust-screen.json consent-state-navigation.mjs consent-navigation.test.mjs recorded-consent-screens.json recorded-navigation-screens.json xterm-screen.mjs consent-state.mjs xterm-screen.test.mjs consent-state.test.mjs recorded-terminal.json xterm-integrity.json; do cp "$root/$file" "$fixture/$file"; done
+for file in actual-worker.mjs actual-plugin-fixture.mjs waiter-provider-step.mjs message-provider-step.mjs actual-provider-step.mjs presence-provider-step.mjs presence-provider-step.test.mjs message-provider-step.test.mjs actual-provider-step.test.mjs recorded-actual-envelope.json actual-compact-state.mjs actual-compact-state.test.mjs composer-state.mjs composer-state.test.mjs recorded-composer-screen.json trust-state.mjs trust-state.test.mjs recorded-trust-screen.json consent-state-navigation.mjs consent-navigation.test.mjs recorded-consent-screens.json recorded-navigation-screens.json xterm-screen.mjs consent-state.mjs xterm-screen.test.mjs consent-state.test.mjs recorded-terminal.json xterm-integrity.json; do cp "$root/$file" "$fixture/$file"; done
 curl --fail --location --max-time 120 https://registry.npmjs.org/@xterm/headless/-/headless-6.0.0.tgz -o "$tmp/xterm.tgz"
 node --input-type=module - "$tmp/xterm.tgz" <<'NODE'
 import {readFileSync} from 'node:fs';import {createHash} from 'node:crypto';
@@ -45,12 +45,12 @@ for dir in src bin vendor; do
   [[ -d "$repo/$dir" && ! -L "$repo/$dir" ]] || exit 1
   mounts+=(--mount "type=bind,src=$repo/$dir,dst=/plugin/$dir,readonly")
 done
-for file in actual-worker.mjs actual-plugin-fixture.mjs message-provider-step.mjs actual-provider-step.mjs presence-provider-step.mjs actual-compact-state.mjs composer-state.mjs trust-state.mjs xterm-screen.mjs consent-state-navigation.mjs; do
+for file in actual-worker.mjs actual-plugin-fixture.mjs waiter-provider-step.mjs message-provider-step.mjs actual-provider-step.mjs presence-provider-step.mjs actual-compact-state.mjs composer-state.mjs trust-state.mjs xterm-screen.mjs consent-state-navigation.mjs; do
  mounts+=(--mount "type=bind,src=$fixture/$file,dst=/fixture/$file,readonly")
 done
 mounts+=(--mount "type=bind,src=$fixture/xterm-pinned/package,dst=/fixture/xterm-pinned/package,readonly" --mount "type=bind,src=$tmp/psst,dst=/psst,readonly" --mount "type=bind,src=$tmp/tls,dst=/fixture-tls,readonly")
 status=0
-for mode in root compact new presence messages; do
+for mode in root compact new presence messages idle; do
  timeout --kill-after=5s 50s docker run --rm --name "$name" --network none --user 1000:1000 --read-only --memory 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m "${mounts[@]}" -e HOME=/tmp/proof-home "$image" node /fixture/actual-worker.mjs "$mode" || status=1
  docker rm -f "$name" >/dev/null 2>&1 || true
  if [[ "$mode" == root && "$status" != 0 ]]; then break; fi

@@ -82,7 +82,7 @@ export function actualProviderStep(input,state){
   correlateNativeResponse(input,ACTUAL_TOOLS[next.completed]);
   let decoded;try{decoded=decodeNativeToolResponse(responses.at(-1));}catch(error){error.proofDiagnostics=actualResponseDiagnostics(responses.at(-1));throw error;}
   const found=[decoded];
-  if(next.completed===0){if(!found.some(v=>v.connected===true&&v.mode==='automatic_required'))throw Object.assign(Error('actual setup status not connected'),{proofDiagnostics:actualResponseDiagnostics(responses.at(-1))});}
+  if(next.completed===0){next.waiterCommand=decoded.waiter_command;if(!found.some(v=>v.connected===true&&v.mode==='automatic_required'))throw Object.assign(Error('actual setup status not connected'),{proofDiagnostics:actualResponseDiagnostics(responses.at(-1))});}
   else {const value=found.find(v=>v.native_session_binding===true&&v.endpoint_scope==='experimental_native_conversation'&&uuid.test(v.conversation_id??'')&&typeof v.client_id==='string');
    assert(value,'actual identity response missing');identity={conversation_id:value.conversation_id,client_id:value.client_id,native_session_binding:true,endpoint_scope:value.endpoint_scope};}
   next.completed++;
