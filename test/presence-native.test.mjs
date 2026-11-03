@@ -36,3 +36,16 @@ test('real HTTP broker notices reach native-bound MCP separately and ACK only ex
  assert.equal((await call('broker_presence_events')).events.length,0);
  assert.equal((await call('broker_message_status',{message_id:sent.message_id})).delivery_state,'queued');
 });
+
+test('official CLI fixture seeds v2 recipient using negotiated epoch and verifies explicit ACK',async t=>{
+ const {prepareActualPluginFixture}=await import('../scripts/native-contract-proof/actual-plugin-fixture.mjs');
+ const {readConnectorConfig}=await import('../src/connector-config.mjs');
+ const {startNativeSession}=await import('../src/native-session.mjs');
+ const {mkdirSync}=await import('node:fs');const {execFileSync}=await import('node:child_process');
+ const p=mkdtempSync(join(tmpdir(),'ag-presence-seed-'));t.after(()=>rmSync(p,{recursive:true,force:true}));const tls=join(p,'tls');mkdirSync(tls);
+ execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-subj','/CN=fixture','-addext','subjectAltName=IP:127.0.0.1','-keyout',join(tls,'key.pem'),'-out',join(tls,'cert.pem')],{stdio:'ignore'});
+ const f=await prepareActualPluginFixture({root:join(p,'root'),home:join(p,'home'),pluginRoot:resolve('.'),brokerRoot:resolve(process.env.PSST_MESSAGE_TEST_SOURCE??'../ai-agent-msg-broker'),tlsDirectory:tls,presence:true});t.after(()=>f.close());
+ const session=await startNativeSession({config:readConnectorConfig(f.connectionFile,{}),conversationId:randomUUID(),isAlive:()=>true});t.after(()=>session.close());
+ const proof=f.seedPresence(session.identity.client_id),read=await session.tools.broker_presence_events({});assert.equal(read.events.length,1);assert.equal(read.events[0].recipient_id,proof.recipientId);
+ assert.equal((await session.tools.broker_acknowledge_presence_event({event_id:read.events[0].event_id})).acknowledged,true);f.verifyPresenceAck(proof);
+});

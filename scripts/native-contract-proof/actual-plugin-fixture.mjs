@@ -66,9 +66,9 @@ export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoo
       seedPresence(senderId){
         assert(presence,'presence fixture mode required');
         const entry=auth.authenticate('Bearer '+token),sender=store.own(entry,senderId),recipient=randomUUID();
-        store.register(entry,{protocol_version:'1',registration_version:2,requested_at:Date.now()+clockOffset,client_id:recipient,client_type:'antigravity-cli',session_instance_id:randomUUID(),connection_id:randomUUID(),previous_epoch:0,metadata:{name:'Offline fixture',model:{provider:null,id:null,source:'unknown'},project:null},capabilities:{protocol_version:'1',adapter_version:'fixture',client_type:'antigravity-cli',receive_enabled:true,durable_inbox:true}});
+        const registered=store.register(entry,{protocol_version:'1',registration_version:2,requested_at:Date.now()+clockOffset,client_id:recipient,client_type:'antigravity-cli',session_instance_id:randomUUID(),connection_id:randomUUID(),previous_epoch:0,metadata:{name:'Offline fixture',model:{provider:null,id:null,source:'unknown'},project:null},capabilities:{protocol_version:'1',adapter_version:'fixture',client_type:'antigravity-cli',receive_enabled:true,durable_inbox:true}});
         const sent=store.send(entry,senderId,sender.epoch,randomUUID(),{recipient_id:recipient,content:{type:'text/plain',text:'PRIVATE_OFFLINE_FIXTURE_BODY'}});
-        store.disconnect(entry,recipient,1);clockOffset+=600001;
+        store.disconnect(entry,recipient,registered.lease_epoch);clockOffset+=600001;
         return {recipientId:recipient,messageId:sent.message_id,senderId};
       },
       verifyPresenceAck(proof){
