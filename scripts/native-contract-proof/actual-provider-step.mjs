@@ -8,6 +8,17 @@ function objects(value,depth=0){
  if(!value||typeof value!=='object')return [];
  return [value,...Object.values(value).flatMap(v=>objects(v,depth+1))];
 }
+// Prefix display is a fixed vocabulary projection, not arbitrary string logging.
+export function nativeNoticeShape(text){
+ const start=text.indexOf('{'),prefix=(start<0?text:text.slice(0,start)).slice(0,512);
+ const words=new Set(['A','pre-tool','it','ran','ran.','Hook','hook','hooks','Tool','tool','call','arguments','Arguments','argument','modified','changed','overwritten','overwrite','PreToolUse','Note','note','The','the','following','by','was','were','has','have','been','to','from','with','and','for','before','execution','result','results','output','input','parameters','parameter','This','this','is','a','an','of','on','keys','key']);
+ const punctuation=new Set([':',',','.',';','(',')','[',']',"'",'"','`','-','=','>','<']);
+ const tokens=prefix.match(/[A-Za-z0-9_/@.%+\-]+|[\s\S]/g)??[];
+ const shape=tokens.slice(0,96).map(token=>words.has(token)?token:/^\s$/.test(token)?' ':punctuation.has(token)?token:'?').join('').replace(/ +/g,' ').trim();
+ let trailingObject=false;
+ if(start>=0){try{const value=JSON.parse(text.slice(start));trailingObject=Boolean(value&&typeof value==='object'&&!Array.isArray(value));}catch{}}
+ return {shape,prefixTruncated:(start<0?text.length:start)>512||tokens.length>96,hasObjectStart:start>=0,trailingObject};
+}
 // Diagnostics never return arbitrary keys, text, URLs, paths, IDs, tokens or permits.
 export function actualResponseDiagnostics(value){
  const all=objects(value),strings=[];
@@ -15,7 +26,7 @@ export function actualResponseDiagnostics(value){
  collect(value);
  const states=['setup_needed','attention_required','pending','approved','connected','cancelled','denied','expired'];
  const errors=['native_binding_rejected','native_root_context_rejected','native_root_setup_required','native_not_connected','native_host_unavailable','native_owner_unavailable','invalid_connector_configuration','invalid_installation_selection','installation_identity_changed','unauthenticated','forbidden','invalid_response','internal_error'];
- return {responseType:Array.isArray(value)?'array':typeof value,parsedObjects:all.length,
+ return {responseType:Array.isArray(value)?'array':typeof value,parsedObjects:all.length,wrapperKeys:Object.fromEntries(['output','result','content','text','error','data','response'].map(key=>[key,Boolean(value&&typeof value==='object'&&Object.hasOwn(value,key))])),noticeShapes:strings.slice(0,8).map(nativeNoticeShape),
   connected:all.filter(v=>typeof v.connected==='boolean').map(v=>v.connected).slice(0,8),
   modes:all.filter(v=>v.mode==='automatic_required').map(()=> 'automatic_required').slice(0,8),
   states:[...new Set(all.map(v=>v.state).filter(v=>states.includes(v)))],

@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {actualProviderStep,actualResponseDiagnostics} from './actual-provider-step.mjs';
+import {actualProviderStep,actualResponseDiagnostics,nativeNoticeShape} from './actual-provider-step.mjs';
 const tools=[{functionDeclarations:[{name:'call_mcp_tool',parameters:{properties:{ServerName:{type:'string'},ToolName:{type:'string'},Arguments:{type:'object'}}}}]}];
 const input=response=>({tools,contents:response?[{role:'user',parts:[{functionResponse:{name:'call_mcp_tool',response:{content:[{type:'text',text:JSON.stringify(response)}]}}}]}]:[]});
 test('only real status then identity and projects safe identity fields',()=>{
@@ -24,4 +24,19 @@ test('status diagnostics expose only allowlisted classification, never secrets o
  const secret='secret-token-and-permit';const value={unexpected:secret,content:[{type:'text',text:'```json\n{"connected":false,"mode":"automatic_required","state":"attention_required","token":"'+secret+'"}\n```'},{type:'text',text:'native_binding_rejected '+secret}],isError:true};
  const diag=actualResponseDiagnostics(value);assert(!JSON.stringify(diag).includes(secret));assert(diag.textShape.fencedJson);assert(diag.textShape.hasConnectedFalse);assert.deepEqual(diag.knownErrors,['native_binding_rejected']);
  assert.throws(()=>actualProviderStep(input({connected:false,state:'attention_required',token:secret}),{sent:1,completed:0}),error=>error.proofDiagnostics.connected[0]===false&&!JSON.stringify(error.proofDiagnostics).includes(secret));
+});
+
+test('native notice diagnostic vocabulary masks tokens, paths, identifiers and unknown words',()=>{
+ const text='Note: Hook PreToolUse modified Arguments with /private/secret-file secret-token 123e4567-e89b-12d3-a456-426614174000.\n{"connected":true,"token":"SECRET"}';
+ const diag=actualResponseDiagnostics({output:text,privateKey:'unknown-secret'});const wire=JSON.stringify(diag);
+ for(const secret of ['private','secret-file','secret-token','123e4567','SECRET','unknown-secret','privateKey'])assert(!wire.includes(secret));
+ assert(diag.wrapperKeys.output);assert(!diag.wrapperKeys.content);assert(diag.noticeShapes[0].shape.includes('Hook PreToolUse modified Arguments'));assert(diag.noticeShapes[0].trailingObject);
+ assert.equal(nativeNoticeShape('Note: {"ok":true} trailing').trailingObject,false);assert.equal(nativeNoticeShape('Note: {} {}').trailingObject,false);assert.equal(nativeNoticeShape('Note: {"ok":').trailingObject,false);
+ assert(nativeNoticeShape('x'.repeat(600)+' {}').prefixTruncated);
+ assert.throws(()=>actualProviderStep({tools,contents:[{parts:[{functionResponse:{name:'call_mcp_tool',response:{output:text}}}]}]},{sent:1,completed:0}),/actual setup status not connected/);
+});
+
+test('verified static native notice words remain visible without allowing unknown material',()=>{
+ const notice='A pre-tool hook changed the arguments of this tool call before it ran.';
+ const result=nativeNoticeShape(notice+'\n{"connected":true}');assert.equal(result.shape,notice);assert(result.trailingObject);
 });
