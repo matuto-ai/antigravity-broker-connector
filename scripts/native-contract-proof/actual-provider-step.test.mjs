@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {actualProviderStep,actualResponseDiagnostics,nativeNoticeShape} from './actual-provider-step.mjs';
 const tools=[{functionDeclarations:[{name:'call_mcp_tool',parameters:{properties:{ServerName:{type:'string'},ToolName:{type:'string'},Arguments:{type:'object'}}}}]}];
-const nativePrefix='Created At: 00:56:00\nCompleted At: 00:56:01\nA pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.\n';
+const nativePrefix='Created At: 2026-11-03T00:56:00Z\nCompleted At: 2026-11-03T00:56:01Z\nA pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.\n\n';
 const model=tool=>({role:'model',parts:[{functionCall:{name:'call_mcp_tool',args:{ServerName:'psst-native_psst',ToolName:tool,Arguments:{}}}}]});
 const input=response=>({tools,contents:response?[model(response.native_session_binding?'broker_identity':'broker_setup_status'),{role:'user',parts:[{functionResponse:{name:'call_mcp_tool',response:{output:nativePrefix+JSON.stringify(response)}}}]}]:[]});
 test('only real status then identity and projects safe identity fields',()=>{
@@ -49,10 +49,10 @@ test('notice projection preserves line boundaries and masks times with only fixe
 });
 test('strict native envelope accepts only exact pinned observed notice and time headers',async()=>{
  const {decodeNativeToolResponse}=await import('./actual-provider-step.mjs');
- const prefix='Created At: 00:56:00\nCompleted At: 00:56:01\nA pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.\n';
+ const prefix='Created At: 2026-11-03T00:56:00Z\nCompleted At: 2026-11-03T00:56:01Z\nA pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.\n\n';
  const data={connected:true,mode:'automatic_required'};
  assert.deepEqual(decodeNativeToolResponse({output:prefix+JSON.stringify(data)}),data);
- assert.deepEqual(decodeNativeToolResponse({output:prefix+'\n'+JSON.stringify(data)}),data);
+ assert.throws(()=>decodeNativeToolResponse({output:prefix+'\n'+JSON.stringify(data)}));
  for(const text of [prefix.replace('Created','Spoofed')+'{}',prefix.replace('00:56:00','24:56:00')+'{}',prefix.replace('Arguments.','Other.')+'{}',prefix+'{} suffix',prefix+'{} {}',prefix+'{"bad":',prefix+'{"error":"forbidden"}',prefix+'{"isError":true}',prefix+'[]',prefix+'null',prefix+'\n\n{}'])assert.throws(()=>decodeNativeToolResponse({output:text}));
  assert.throws(()=>decodeNativeToolResponse({output:prefix+'{}',error:false}));
 });
@@ -78,4 +78,13 @@ test('header format diagnostics mask all digits and unknown text, count exact se
  const d=nativeHeaderFormat(text);assert.equal(d.createdShape,' dddd-dd-dd dd:dd:dd.dddZ');assert.equal(d.completedShape,' dd:dd:dd+dd:dd');assert.equal(d.headerNewlines,2);assert.equal(d.noticeNewlines,1);assert.equal(d.bodyNewlines,2);assert.deepEqual(d.carriageReturns,[0,0,0]);
  const wire=JSON.stringify(nativeHeaderFormat(text.replace('2026-11-03 01:03:45.123Z','SECRET/token')));assert(!wire.includes('SECRET'));assert(!wire.includes('token'));assert.deepEqual(nativeHeaderFormat('other header secret'),{matchedHeaders:false});
  assert.equal(actualResponseDiagnostics({output:text,extra:'SECRET'}).wrapperKeyCount,2);
+});
+
+test('recorded native envelope shape uses exact real UTC calendar timestamps',async()=>{
+ const {readFileSync}=await import('node:fs');const {decodeNativeToolResponse}=await import('./actual-provider-step.mjs');
+ const record=JSON.parse(readFileSync(new URL('./recorded-actual-envelope.json',import.meta.url)));assert.equal(record.provenance.run,'41557405226');assert(record.provenance.synthetic_dates);
+ assert.deepEqual(decodeNativeToolResponse(record.response),{connected:true,mode:'automatic_required'});
+ for(const stamp of ['00:56:00','2026-02-30T00:56:00Z','2026-13-01T00:56:00Z','2026-11-03T00:56:00.123Z','2026-11-03T00:56:00+00:00','2026-11-03X00:56:00Z'])assert.throws(()=>decodeNativeToolResponse({output:record.response.output.replace('2026-11-03T00:56:00Z',stamp)}));
+ assert.throws(()=>decodeNativeToolResponse({output:record.response.output.replace('Arguments.\n\n','Arguments.\n')}));
+ const request=input({connected:true,mode:'automatic_required'});request.contents[1].parts[0].functionResponse.response=record.response;const next=actualProviderStep(request,{sent:1,completed:0});assert.equal(next.parts[0].functionCall.args.ToolName,'broker_identity');
 });
