@@ -22,7 +22,7 @@ function moduleAt(root,path) { return import(pathToFileURL(join(root,path)).href
 /** A normal approved installation, not an alternate configReader or a TLS bypass.
  * All credentials belong exclusively to a fresh disposable broker and are never returned.
  */
-export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoot,tlsDirectory}) {
+export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoot,tlsDirectory,presence=false}) {
   for(const path of [root,home,pluginRoot,brokerRoot,tlsDirectory])assert(typeof path==='string'&&resolve(path)===path,'absolute_fixture_path_required');
   privateDirectory(root);privateDirectory(home);
   const data=join(root,'actual-plugin');privateDirectory(data);
@@ -30,7 +30,8 @@ export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoo
   for(const path of [certFile,keyFile])assert(lstatSync(path).isFile()&&!lstatSync(path).isSymbolicLink(),'fixture_tls_file_required');
   const [{BrokerStore},{CredentialStore},{createBrokerServer}]=await Promise.all([
     moduleAt(brokerRoot,'src/store.mjs'),moduleAt(brokerRoot,'src/auth.mjs'),moduleAt(brokerRoot,'src/server.mjs')]);
-  const store=await BrokerStore.open({path:join(data,'broker.sqlite'),requireRegistrationV2:true});
+  let clockOffset=0;
+  const store=await BrokerStore.open({path:join(data,'broker.sqlite'),requireRegistrationV2:true,clock:()=>Date.now()+clockOffset});
   let app;
   try {
     const token=randomBytes(32).toString('base64url'),credentialId='enrolled-'+randomUUID(),adapterId='installation-'+randomUUID();
@@ -60,8 +61,21 @@ export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoo
     let closed=false;
     return {
       brokerUrl,connectionFile,installationDirectory,eventsFile,mcp,hooks:{'offline-actual-psst':hooks},
-      permissions:{allow:ACTUAL_TOOLS.map(tool=>`mcp(${ACTUAL_SERVER}/${tool})`)},
+      permissions:{allow:[...ACTUAL_TOOLS,...presence?['broker_presence_events','broker_acknowledge_presence_event']:[]].map(tool=>`mcp(${ACTUAL_SERVER}/${tool})`)},
       readEvents:()=>{try{return readFileSync(eventsFile,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);}catch(e){if(e.code==='ENOENT')return [];throw e;}},
+      seedPresence(senderId){
+        assert(presence,'presence fixture mode required');
+        const entry=auth.authenticate('Bearer '+token),sender=store.own(entry,senderId),recipient=randomUUID();
+        const registered=store.register(entry,{protocol_version:'1',registration_version:2,requested_at:Date.now()+clockOffset,client_id:recipient,client_type:'antigravity-cli',session_instance_id:randomUUID(),connection_id:randomUUID(),previous_epoch:0,metadata:{name:'Offline fixture',model:{provider:null,id:null,source:'unknown'},project:null},capabilities:{protocol_version:'1',adapter_version:'fixture',client_type:'antigravity-cli',receive_enabled:true,durable_inbox:true}});
+        const sent=store.send(entry,senderId,sender.epoch,randomUUID(),{recipient_id:recipient,content:{type:'text/plain',text:'PRIVATE_OFFLINE_FIXTURE_BODY'}});
+        store.disconnect(entry,recipient,registered.lease_epoch);clockOffset+=600001;
+        return {recipientId:recipient,messageId:sent.message_id,senderId};
+      },
+      verifyPresenceAck(proof){
+        const entry=auth.authenticate('Bearer '+token);
+        assert.equal(store.receipt(entry,proof.senderId,proof.messageId).delivery_state,'queued');
+        assert.equal(store.db.prepare('SELECT COUNT(*) n FROM presence_events WHERE sender=? AND acknowledged=0').get(proof.senderId).n,0);
+      },
       async close(){if(closed)return;closed=true;try{await app.close();}finally{store.close();}},
     };
   } catch(error) {try{if(app?.server.listening)await app.close();}finally{store.close();}throw error;}

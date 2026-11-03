@@ -36,6 +36,8 @@ export const NATIVE_DEFINITIONS=[
  {name:'broker_cancel_setup',description:'Cancel local pending setup/resume, keeping existing approved authorization.',inputSchema:shape({})},
  {name:'broker_connect',description:'Explicitly connect this native conversation using a PRIVATE pairing_file path or connection_file path, never secret text. Experimental native wakeup is not certified.',inputSchema:shape({pairing_file:{type:'string',maxLength:4096},connection_file:{type:'string',maxLength:4096}})},
  {name:'broker_disconnect',description:'Disconnect this conversation and cancel its waiter. Does not revoke the installation credential.',inputSchema:shape({})},
+ {name:'broker_presence_events',description:'Read pending transport notices, separate from agent messages. No reply timeout or proof of non-delivery. Explicit event acknowledgment is required; drain batches while has_more.',inputSchema:shape({})},
+ {name:'broker_acknowledge_presence_event',description:'Explicitly acknowledge a previously read transport event_id. Does not acknowledge any message, resend, cancel or close sessions.',inputSchema:{...shape({event_id:{type:'string',format:'uuid',maxLength:36}}),required:['event_id']}},
  ...TOOL_DEFINITIONS,
 ].map(d=>({...d,inputSchema:{...d.inputSchema,properties:{...d.inputSchema.properties,__psst_permit:{type:'string',format:'uuid',maxLength:36}}}}));
 
@@ -217,7 +219,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
     return admitted.result;
   };
   const stdio=serveStdio({input,output,tools,nativeTransportMetadata:true,readableNativeReceive:true,maxReceiveResponseBytes:NATIVE_RECEIVE_RESPONSE_BYTES,definitions:NATIVE_DEFINITIONS,onClose:close,
-    instructions:'Psst native automatic waiter delivery. Saved approval reconnects only after native binding. Use broker_setup for explicit URL-only enrollment; approval happens in the broker UI. The native hook supplies __psst_permit. After connection, run waiter_command with native run_command WaitMsBeforeAsync=500 and end the turn. On its notice, receive, read, acknowledge message_id, drain FIFO and re-arm. Retry and receipt keys stay internal. This wakeup route still requires native acceptance verification.'});
+    instructions:'Psst native automatic waiter delivery. Saved approval reconnects only after native binding. Use broker_setup for explicit URL-only enrollment; approval happens in the broker UI. The native hook supplies __psst_permit. After connection, run waiter_command with native run_command WaitMsBeforeAsync=500 and end the turn. For an agent-message notice, receive, read, acknowledge message_id, drain FIFO and re-arm. For a transport notice, read broker_presence_events, explicitly acknowledge only the event_id read using broker_acknowledge_presence_event, drain batches and re-arm; never treat it as an agent message or auto-resend/cancel/close. Retry and receipt keys stay internal. This wakeup route still requires native acceptance verification.'});
   const abort=()=>{void stdio.close();};signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   return {directory,binding,tools,done:stdio.done,async close(){signal?.removeEventListener('abort',abort);await stdio.close();}};
 }

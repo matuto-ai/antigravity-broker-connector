@@ -1,3 +1,4 @@
+import { PRESENCE_NOTICE } from './presence-notices.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { openSync, closeSync, fstatSync, constants, watch } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -39,6 +40,13 @@ export async function waitNativeProcess({directory,permit,signal}) {
             // Exhausted heads stay silent in the background; no model wake loop.
           }
           else if(head)throw Error();
+          if(!finished&&db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='native_presence_events'").get()) {
+            for(const event of db.prepare("SELECT event_id FROM native_presence_events WHERE state='pending' ORDER BY created,event_id LIMIT 256").all()) {
+              const notice=binding.presenceNotice({conversationId,clientId:initial.clientId,eventId:event.event_id});
+              if(notice==='pending'){finish(PRESENCE_NOTICE);break;}
+              if(notice==='attention'){finish('Psst transport notice requires attention: repeated notification was not explicitly acknowledged. Do not automatically re-arm. Agent messages and their read receipts are unchanged.');break;}
+            }
+          }
         }catch{finished=true;reject(Error('native_waiter_unavailable'));}
       };
       // fs.watch is an optimization. Bounded local checks cover lost FS events

@@ -11,7 +11,7 @@ const rootTransitionTools = new Set(['broker_setup_status','broker_connect']);
 const fail = () => { throw new Error('native_binding_rejected'); };
 const equal = (a,b) => canonical(a) === canonical(b);
 const digest = args => createHash('sha256').update(canonical(args)).digest('hex');
-const tools = new Set(['broker_setup','broker_setup_status','broker_cancel_setup','broker_wait_approval','broker_connect','broker_disconnect','broker_wait','broker_identity','broker_list_clients','broker_send','broker_receive','broker_acknowledge','broker_message_status','broker_update_metadata','broker_sent_history','broker_message_content','broker_resend','broker_cancel']);
+const tools = new Set(['broker_setup','broker_setup_status','broker_cancel_setup','broker_wait_approval','broker_connect','broker_disconnect','broker_wait','broker_identity','broker_list_clients','broker_send','broker_receive','broker_acknowledge','broker_message_status','broker_update_metadata','broker_sent_history','broker_message_content','broker_resend','broker_cancel','broker_presence_events','broker_acknowledge_presence_event']);
 
 /** Only the native launcher/hook calls this; no model arguments choose a PID. */
 export function processIdentity(pid) {
@@ -202,6 +202,18 @@ export class NativeBinding {
   endOwner() {
     try {this.transaction(()=>{this.assertHost();this.db.exec('DELETE FROM permits; UPDATE binding SET owner_epoch=NULL WHERE id=1;');});}
     finally {this.unusable=true;this.abort.abort();}
+  }
+  presenceNotice({conversationId,clientId,eventId}) {
+    return this.transaction(()=>{
+      const binding=this.assertHost();validateUuid(clientId);validateUuid(eventId);
+      if(binding.conversation!==conversationId)fail();
+      this.db.exec('CREATE TABLE IF NOT EXISTS presence_notices(client TEXT NOT NULL,event TEXT NOT NULL,count INTEGER NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(client,event))');
+      const count=this.db.prepare('SELECT count FROM presence_notices WHERE client=? AND event=?').get(clientId,eventId)?.count??0;
+      if(count>=3)return 'suppressed';
+      this.db.prepare('INSERT INTO presence_notices VALUES(?,?,?,?) ON CONFLICT(client,event) DO UPDATE SET count=excluded.count').run(clientId,eventId,count+1,this.now());
+      this.db.exec('DELETE FROM presence_notices WHERE rowid IN (SELECT rowid FROM presence_notices ORDER BY created DESC LIMIT -1 OFFSET 256)');
+      return count===2?'attention':'pending';
+    });
   }
   notice({conversationId,clientId,messageId}) {
     return this.transaction(()=>{
