@@ -49,12 +49,15 @@ export function actualResponseDiagnostics(value){
 const nativeNotice='A pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.';
 const time='([0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z)';
 const envelope=new RegExp('^Created At: '+time+'\\nCompleted At: '+time+'\\n'+nativeNotice.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\n\\n');
-export function decodeNativeToolResponse(value){
+export function decodeNativeTextResponse(value){
  if(!value||typeof value!=='object'||Array.isArray(value)||!Object.hasOwn(value,'output'))throw Error('unsupported_native_response_envelope');
  if(Object.keys(value).length!==1||typeof value.output!=='string'||Buffer.byteLength(value.output)>65536)throw Error('unsupported_native_response_envelope');
  const match=envelope.exec(value.output);if(!match)throw Error('unsupported_native_response_envelope');
  for(const stamp of [match[1],match[2]]){const date=new Date(stamp);if(!Number.isFinite(date.getTime())||date.toISOString().slice(0,19)+'Z'!==stamp)throw Error('invalid_native_response_timestamp');}
- const body=value.output.slice(match[0].length);if(!body.startsWith('{'))throw Error('invalid_native_response_json');
+ return value.output.slice(match[0].length);
+}
+export function decodeNativeToolResponse(value){
+ const body=decodeNativeTextResponse(value);if(!body.startsWith('{'))throw Error('invalid_native_response_json');
  let parsed;try{parsed=JSON.parse(body);}catch{throw Error('invalid_native_response_json');}
  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)||parsed.error||parsed.isError===true)throw Error('invalid_native_response_json');
  return parsed;
