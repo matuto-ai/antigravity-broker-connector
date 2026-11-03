@@ -114,6 +114,7 @@ const compactPoll=interactive?setInterval(()=>{
   if(trustConfirmationSent){
    if(screen.version===trustScreenVersion&&Date.now()-trustSentAt<1000)return;
    if(screen.version>trustScreenVersion&&composerState(current).ready){trustPromptDismissed=true;consentEvidence.push({action:'verified_post_trust_idle_composer',screen:current});}
+   else if(['idle','setup','busy'].includes(mode)){return;} // A real background command can start before the first idle frame. Never type through it.
    else {consentBlocked=true;consentEvidence.push({action:'stop_post_trust_composer_unverified',screen:current});clearInterval(compactPoll);child.kill('SIGTERM');return;}
   } else {
    const trust=trustState(current,{authorizedFixtureWorkspaceTrust:true});
