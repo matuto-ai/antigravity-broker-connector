@@ -50,7 +50,7 @@ for file in actual-worker.mjs actual-plugin-fixture.mjs actual-provider-step.mjs
 done
 mounts+=(--mount "type=bind,src=$fixture/xterm-pinned/package,dst=/fixture/xterm-pinned/package,readonly" --mount "type=bind,src=$tmp/psst,dst=/psst,readonly" --mount "type=bind,src=$tmp/tls,dst=/fixture-tls,readonly")
 status=0
-for mode in root compact; do
+for mode in root compact new; do
  timeout --kill-after=5s 50s docker run --rm --name "$name" --network none --user 1000:1000 --read-only --memory 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m "${mounts[@]}" -e HOME=/tmp/proof-home "$image" node /fixture/actual-worker.mjs "$mode" || status=1
  docker rm -f "$name" >/dev/null 2>&1 || true
 done

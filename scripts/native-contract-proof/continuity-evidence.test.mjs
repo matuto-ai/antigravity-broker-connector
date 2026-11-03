@@ -14,3 +14,8 @@ test('continuity rejects missing completion, child provenance and host replaceme
  const hook=structuredClone(observed.hook);hook.at(-1).hostStart='different';
  assert.equal(continuityEvidence('compact',observed.mcp,hook),false);
 });
+test('recorded native new rotates root in one exact host lifetime',()=>{
+ const actual=JSON.parse(readFileSync(new URL('./recorded-new-observations.json',import.meta.url)));
+ assert.equal(continuityEvidence('new',actual.mcp,actual.hook),true);
+ assert.equal(continuityEvidence('compact',actual.mcp,actual.hook),false);
+});
