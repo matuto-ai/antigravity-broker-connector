@@ -18,9 +18,10 @@ try {
  run('npm',['install','--ignore-scripts','--offline','--no-audit','--no-fund','--prefix',install,join(temp,packed[0].filename)]);
  const executable=join(install,'node_modules','@matuto-ai','antigravity-psst-connector','bin','psst-antigravity.mjs');
  assert.match(run(process.execPath,[executable,'--help'],{cwd:temp}),/cooperative stdio MCP/);
- const doctor=JSON.parse(run(process.execPath,[executable,'doctor'],{cwd:temp}));
+ const doctor=JSON.parse(run(process.execPath,[executable,'doctor'],{cwd:temp,env:{...process.env,HOME:temp}}));
  assert.equal(doctor.package_version,packed[0].version);assert.equal(doctor.package_shape,'verified');
- assert.equal(doctor.native_installation,'not_checked');assert.match(doctor.next_action,/^\/plugin install /);
+ assert.equal(doctor.native_installation,'registration_or_package_absent');
+ assert.equal(doctor.managed_registration.enabled,'not_checked');assert.equal(doctor.import_permission,'not_checked');assert.equal(doctor.owner_lock,'not_checked');assert.match(doctor.next_action,/^\/plugin install /);
  assert(lstatSync(join(doctor.plugin_directory,'plugin.json')).isFile());
  const generator=join(install,'node_modules','.bin','psst-antigravity-native-plugin');
  const generated=JSON.parse(run(generator,[join(temp,'native-plugin'),'--experimental-native'],{cwd:temp}));

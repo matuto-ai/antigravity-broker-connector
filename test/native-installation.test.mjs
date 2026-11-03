@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, cpSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, cpSync, mkdirSync, readFileSync, writeFileSync, readdirSync, chmodSync, symlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,11 +16,14 @@ function fixture(t) {
 }
 test('read-only packaged source check supports scoped paths and prints native, not nested-shell action', t => {
   const f = fixture(t), before = readdirSync(f.pkg, { recursive: true }).sort();
-  const result = inspectNativeInstallation(f.pkg);
+  const result = inspectNativeInstallation(f.pkg, { home: f.root, env: { PATH: '/not-a-path' } });
   assert.equal(result.plugin_name, 'psst-native');
   assert.equal(result.package_version, JSON.parse(readFileSync(join(f.pkg, 'package.json'))).version);
   assert.equal(result.package_shape, 'verified');
-  assert.equal(result.native_installation, 'not_checked');
+  assert.equal(result.native_installation, 'registration_or_package_absent');
+  assert.equal(result.launcher.status, 'not_found_on_path');
+  assert.equal(result.owner_lock, 'not_checked');
+  assert.equal(result.import_permission, 'not_checked');
   assert.equal(result.native_connection, 'not_checked');
   assert.equal(result.next_action, `/plugin install ${f.pkg}`);
   assert.match(result.instructions, /not into ! or a nested/);
@@ -64,4 +67,51 @@ test('non-simple paths are sent to native UI input rather than guessed shell quo
  const f=fixture(t),spaced=join(f.root,'package with space');cpSync(f.pkg,spaced,{recursive:true});
  const result=inspectNativeInstallation(spaced);assert.equal(result.plugin_directory,spaced);assert.match(result.next_action,/native UI input/);
  assert.doesNotMatch(result.next_action,/^\/plugin install /);
+});
+
+function managedFixture(t) {
+  const f = fixture(t), config = join(f.root, '.gemini', 'config');
+  const installed = join(config, 'plugins', 'psst-native');
+  cpSync(f.pkg, installed, { recursive: true });
+  const registry = join(config, 'import_manifest.json');
+  writeFileSync(registry, JSON.stringify({ imports: [{ name: 'psst-native', source: 'antigravity', components: ['skills','mcpServers','hooks'] }] }));
+  return { ...f, config, installed, registry };
+}
+test('doctor inspects official manager registration and version without reading settings or invoking agy', t => {
+  const f = managedFixture(t), bin = join(f.root, 'bin'), marker = join(f.root, 'executed');
+  mkdirSync(bin);writeFileSync(join(bin, 'agy'), `#!/bin/sh\ntouch '${marker}'\n`);chmodSync(join(bin,'agy'),0o700);
+  // The settings path is deliberately unreadable as JSON; doctor must not inspect it.
+  mkdirSync(join(f.config, 'config.json'));
+  const result = inspectNativeInstallation(f.pkg, { home: f.root, env: { PATH: bin } });
+  assert.equal(result.native_installation, 'registered_package_verified');
+  assert.equal(result.managed_registration.package_version, result.package_version);
+  assert.equal(result.managed_registration.enabled, 'not_checked');
+  assert.equal(result.launcher.status, 'executable_found');
+  assert.equal(result.launcher.execution, 'not_attempted');
+  assert.equal(result.runtime.process.native_host, 'not_verified');
+  assert.equal(existsSync(marker), false);
+  const manifest = JSON.parse(readFileSync(join(f.installed,'plugin.json')));
+  const pkg = JSON.parse(readFileSync(join(f.installed,'package.json')));
+  manifest.version = pkg.version = '0.0.1';
+  writeFileSync(join(f.installed,'plugin.json'),JSON.stringify(manifest));
+  writeFileSync(join(f.installed,'package.json'),JSON.stringify(pkg));
+  assert.equal(inspectNativeInstallation(f.pkg,{home:f.root}).native_installation,'registered_version_mismatch');
+});
+test('doctor rejects corrupt, duplicate, incomplete and symlinked manager registrations', t => {
+  const f = managedFixture(t), inspect = () => inspectNativeInstallation(f.pkg,{home:f.root}).native_installation;
+  const entry = {name:'psst-native',source:'antigravity',components:['skills','mcpServers','hooks']};
+  for (const imports of [[entry,entry],[{...entry,source:'unknown'}],[{...entry,components:['skills']}]]) {
+    writeFileSync(f.registry,JSON.stringify({imports}));assert.equal(inspect(),'registration_or_package_invalid');
+  }
+  writeFileSync(f.registry,'{');assert.equal(inspect(),'registration_or_package_invalid');
+  writeFileSync(f.registry,JSON.stringify({imports:[]}));assert.equal(inspect(),'not_registered');
+  writeFileSync(f.registry,JSON.stringify({imports:[entry]}));
+  rmSync(f.installed,{recursive:true});symlinkSync(f.pkg,f.installed,'dir');assert.equal(inspect(),'registration_or_package_invalid');
+});
+test('PATH lookup skips nonexecutables and resolves executable symlinks without execution', t => {
+  const f=fixture(t), first=join(f.root,'first'), second=join(f.root,'second');mkdirSync(first);mkdirSync(second);
+  writeFileSync(join(first,'agy'),'not executable',{mode:0o600});
+  writeFileSync(join(second,'launcher'),'#!/bin/sh\nexit 99\n',{mode:0o700});symlinkSync(join(second,'launcher'),join(second,'agy'));
+  const result=inspectNativeInstallation(f.pkg,{home:f.root,env:{PATH:`${first}:${second}`}});
+  assert.equal(result.launcher.path,join(second,'agy'));assert.equal(result.launcher.resolved_path,join(second,'launcher'));
 });

@@ -1,5 +1,6 @@
-import { readFileSync, lstatSync, realpathSync } from 'node:fs';
-import { join, isAbsolute } from 'node:path';
+import { readFileSync, lstatSync, realpathSync, accessSync, constants } from 'node:fs';
+import { join, isAbsolute, resolve, delimiter } from 'node:path';
+import { homedir } from 'node:os';
 import { verifyReference } from './reference-pin.mjs';
 
 export function supportedNativeRuntime(platform = process.platform, version = process.versions.node) {
@@ -8,12 +9,18 @@ export function supportedNativeRuntime(platform = process.platform, version = pr
 }
 
 function regularFile(root, path) {
+  let directory = root;
+  for (const segment of path.split('/').slice(0, -1)) {
+    directory = join(directory, segment);
+    const parent = lstatSync(directory);
+    if (!parent.isDirectory() || parent.isSymbolicLink()) throw Error('plugin_file_invalid');
+  }
   const stat = lstatSync(join(root, path));
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) throw Error('plugin_file_invalid');
 }
 
 /** Read-only: no copying, native launcher, registry, credentials or lock changes. */
-export function inspectNativeInstallation(path, { platform = process.platform, version = process.versions.node } = {}) {
+function inspectPackage(path, { platform = process.platform, version = process.versions.node } = {}) {
   if (!supportedNativeRuntime(platform, version)) throw Error('linux_node_24_19_through_24_x_required');
   if (typeof path !== 'string' || !isAbsolute(path)) throw Error('absolute_plugin_directory_required');
   let root;
@@ -36,6 +43,76 @@ export function inspectNativeInstallation(path, { platform = process.platform, v
       instructions: 'Paste this slash command directly into the current Antigravity TUI, not into ! or a nested agy/antigravity process. The native manager still enforces normal permissions. If it denies import or reports an owner lock, stop; do not delete locks or switch executable/identity.',
     };
   } catch { throw Error('native_plugin_package_invalid'); }
+}
+
+// Observed official CLI 1.4.7 manager layout. This is inspection, not permission
+// or native-host certification. Never read config.json, credentials or locks.
+function managedRegistration(home, expectedVersion, runtime) {
+  try {
+    if (!isAbsolute(home)) throw Error();
+    const canonicalHome = realpathSync(home);
+    let directory = canonicalHome;
+    for (const segment of ['.gemini', 'config']) {
+      directory = join(directory, segment);
+      const stat = lstatSync(directory);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error();
+    }
+    regularFile(directory, 'import_manifest.json');
+    const registry = JSON.parse(readFileSync(join(directory, 'import_manifest.json'), 'utf8'));
+    if (!Array.isArray(registry.imports)) throw Error();
+    const entries = registry.imports.filter(entry => entry?.name === 'psst-native');
+    if (!entries.length) return { status: 'not_registered', enabled: 'not_checked' };
+    if (entries.length !== 1 || entries[0].source !== 'antigravity'
+      || !Array.isArray(entries[0].components)
+      || !['skills', 'mcpServers', 'hooks'].every(value => entries[0].components.includes(value))) throw Error();
+    for (const segment of ['plugins', 'psst-native']) {
+      directory = join(directory, segment);
+      const stat = lstatSync(directory);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error();
+    }
+    const installed = inspectPackage(directory, runtime);
+    return { status: installed.package_version === expectedVersion ? 'registered_package_verified' : 'registered_version_mismatch',
+      package_version: installed.package_version, plugin_directory: directory,
+      enabled: 'not_checked', registry_format: 'official_cli_1.4.7' };
+  } catch (error) {
+    return { status: error.code === 'ENOENT' ? 'registration_or_package_absent' : 'registration_or_package_invalid', enabled: 'not_checked' };
+  }
+}
+
+function launcherOnPath(path) {
+  for (const directory of (path ?? '').split(delimiter)) {
+    const candidate = resolve(directory || '.', 'agy');
+    try {
+      const executable = realpathSync(candidate);
+      if (!lstatSync(executable).isFile()) continue;
+      accessSync(executable, constants.X_OK);
+      return { status: 'executable_found', path: candidate, resolved_path: executable, execution: 'not_attempted', policy: 'not_checked' };
+    } catch { /* Follow normal PATH search without executing or reading wrappers. */ }
+  }
+  return { status: 'not_found_on_path', execution: 'not_attempted', policy: 'not_checked' };
+}
+
+function doctorProcess() {
+  try {
+    // Linux proc(5) executable and start time describe this doctor process only.
+    // Do not infer a verified Antigravity host from a name, environment or PID.
+    const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+    const start = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+    if (!/^\d+$/.test(start)) throw Error();
+    return { status: 'observed', pid: process.pid, executable: realpathSync(`/proc/${process.pid}/exe`), start_ticks: start,
+      native_host: 'not_verified' };
+  } catch { return { status: 'unavailable', native_host: 'not_verified' }; }
+}
+
+/** No subprocesses, writes, credential/config reads, lock probing or policy changes. */
+export function inspectNativeInstallation(path, { platform = process.platform, version = process.versions.node,
+  home = homedir(), env = process.env } = {}) {
+  const result = inspectPackage(path, { platform, version });
+  const registration = managedRegistration(home, result.package_version, { platform, version });
+  return { ...result, native_installation: registration.status, managed_registration: registration,
+    launcher: launcherOnPath(env.PATH), runtime: { platform, node: version, process: doctorProcess() },
+    import_permission: 'not_checked', owner_lock: 'not_checked',
+    instructions: result.instructions + ' Launcher presence and a registered package do not prove import permission, enabled status, host ownership, or automatic delivery. Settings and owner locks were not read.' };
 }
 
 export const nativeInstallationError = code => ({

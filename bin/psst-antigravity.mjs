@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
 import { inspectNativeInstallation, nativeInstallationError } from '../src/native-installation.mjs';
-const usage = 'Usage: psst-antigravity doctor [absolute-plugin-directory] (read-only native installation check)\n        psst-antigravity diagnostic --config /absolute/private/config.json\n       psst-antigravity pair --pairing-file /absolute/private/pairing.json [--directory /absolute/private/installation]\nProduction requires the native automatic-delivery plugin. The cooperative stdio MCP server is diagnostic/test-only; it does not launch or inject into Antigravity.\nPair explicitly enrolls this installation; it does not connect or wake a native conversation.\n';
+const usage = 'Usage: psst-antigravity doctor [absolute-plugin-directory] (read-only source, agy PATH and managed registration check)\n        psst-antigravity diagnostic --config /absolute/private/config.json\n       psst-antigravity pair --pairing-file /absolute/private/pairing.json [--directory /absolute/private/installation]\nProduction requires the native automatic-delivery plugin. The cooperative stdio MCP server is diagnostic/test-only; it does not launch or inject into Antigravity.\nPair explicitly enrolls this installation; it does not connect or wake a native conversation.\n';
 if (process.argv.length === 3 && ['--help','-h'].includes(process.argv[2])) { process.stdout.write(usage); }
 else if (process.argv[2] === 'doctor') {
   try {

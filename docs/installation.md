@@ -104,3 +104,34 @@ cleanup of abandoned endpoints is not provided.
 Removing the `psst` MCP entry and restarting disconnects the connector. Removing
 the npm package does not remove journals or revoke a broker credential; those are
 separate operator decisions.
+
+
+## Read-only native doctor
+
+Run `psst-antigravity doctor [absolute-plugin-directory]` in the existing
+sandbox. It checks the package shape and supported Node runtime, resolves the
+first executable `agy` on PATH without executing or reading the wrapper, and
+reports the doctor process executable/start time from Linux procfs. This process
+information is descriptive: it does not identify or authorize a native host.
+
+The doctor reads only the CLI 1.4.7 manager's
+`~/.gemini/config/import_manifest.json` and the registered
+`~/.gemini/config/plugins/psst-native` package. It distinguishes absent/invalid
+registration, version mismatch and a verified registered package. This layout
+was observed using the pinned official 1.4.7 manager in a fresh temporary HOME;
+unknown layouts fail closed. It rejects symlinked registry/package directories,
+never changes files, and never reads settings, authentication or owner locks.
+Package shape/version checks are not whole-package digest attestation.
+
+Enabled status, wrapper import policy, owner locks and native connection remain
+explicitly unverified. A successful doctor exit means the selected source package
+is valid; inspect the separate registration and launcher status fields. Finding
+`agy` or an installed package is not permission to import, bypass a wrapper or
+start a nested host. Use the current TUI's native `/plugin` manager for the actual
+installation and ordinary permissions; stop on denial or an owner lock.
+
+`scripts/validate-official-native.sh` independently checks supported manager
+install and repeated install in temporary HOME using pinned official CLI 1.4.7,
+then asserts exactly one enabled registration with the expected package version.
+This manager-only check needs no authentication and does not certify the user's
+`agy` wrapper, current host, model wakeup or authenticated delivery.

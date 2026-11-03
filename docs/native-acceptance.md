@@ -140,3 +140,13 @@ wrapper is synthetic and does not substitute for the Docker/official-CLI result.
 Neither test establishes vendor-model authentication, URL/admin enrollment,
 unattended idle/busy wakeup, actual owner installation or conversation-only
 cleanup. Those remaining acceptance gates keep issue #8 open.
+
+## Complete issue-8 candidate
+
+See [the original acceptance checklist](issue-8-acceptance.md) for the complete
+remaining scope. The candidate adds `idle`, `busy` and `setup` modes to the isolated
+suite, with real production one-use waiter permits and real form-admin approval.
+Until their exact-head CI passes, these modes are unverified tests, not evidence
+that automatic native arrival works. Even passing synthetic-provider runs do not
+replace the original authenticated owner-host acceptance or establish a native
+conversation-deletion hook.

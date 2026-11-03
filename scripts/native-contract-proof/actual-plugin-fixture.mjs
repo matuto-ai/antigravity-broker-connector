@@ -1,5 +1,6 @@
 // Qualification-only setup. Call inside the isolated native fixture after its network guard.
 import assert from 'node:assert/strict';
+import {prepareApprovalBrokerFixture} from './approval-broker-fixture.mjs';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, lstatSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -22,7 +23,7 @@ function moduleAt(root,path) { return import(pathToFileURL(join(root,path)).href
 /** A normal approved installation, not an alternate configReader or a TLS bypass.
  * All credentials belong exclusively to a fresh disposable broker and are never returned.
  */
-export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoot,tlsDirectory,presence=false,messages=false,wakeup=false}) {
+export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoot,tlsDirectory,presence=false,messages=false,wakeup=false,approvalSetup=false}) {
   for(const path of [root,home,pluginRoot,brokerRoot,tlsDirectory])assert(typeof path==='string'&&resolve(path)===path,'absolute_fixture_path_required');
   privateDirectory(root);privateDirectory(home);
   const data=join(root,'actual-plugin');privateDirectory(data);
@@ -31,23 +32,28 @@ export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoo
   const [{BrokerStore},{CredentialStore},{createBrokerServer}]=await Promise.all([
     moduleAt(brokerRoot,'src/store.mjs'),moduleAt(brokerRoot,'src/auth.mjs'),moduleAt(brokerRoot,'src/server.mjs')]);
   let clockOffset=0;
-  const store=await BrokerStore.open({path:join(data,'broker.sqlite'),requireRegistrationV2:true,clock:()=>Date.now()+clockOffset});
-  let app;
+  let store,app,auth,brokerUrl,token,connectionFile,installationDirectory,approvalFixture,approvedRequest;
   try {
-    const token=randomBytes(32).toString('base64url'),credentialId='enrolled-'+randomUUID(),adapterId='installation-'+randomUUID();
+    if(approvalSetup){
+      approvalFixture=await prepareApprovalBrokerFixture({root,home,brokerRoot,tlsDirectory});
+      ({store,auth,brokerUrl,installationDirectory}=approvalFixture);
+    }else{
+    store=await BrokerStore.open({path:join(data,'broker.sqlite'),requireRegistrationV2:true,clock:()=>Date.now()+clockOffset});
+    token=randomBytes(32).toString('base64url');const credentialId='enrolled-'+randomUUID(),adapterId='installation-'+randomUUID();
     const expiresAt=new Date(Date.now()+3600000).toISOString(),scope='native-proof';
     const credentialsFile=join(data,'credentials.json');
     json(credentialsFile,{credentials:[{credential_id:credentialId,token_sha256:hash(token),principal_id:'offline-fixture-owner',adapter_id:adapterId,client_types:['antigravity-cli'],scopes:[scope],expires_at:expiresAt}]});
-    const auth=new CredentialStore({path:credentialsFile,onRevoke:ids=>store.revoke(ids),onPolicyChange:entries=>store.applyAuthorizationPolicies(entries)});
+    auth=new CredentialStore({path:credentialsFile,onRevoke:ids=>store.revoke(ids),onPolicyChange:entries=>store.applyAuthorizationPolicies(entries)});
     app=createBrokerServer({store,auth,host:'127.0.0.1',port:0,tls:{certFile,keyFile}});
-    const address=await app.listen(),brokerUrl=`https://127.0.0.1:${address.port}`;
+    const address=await app.listen();brokerUrl=`https://127.0.0.1:${address.port}`;
     const bundleDirectory=join(data,'enrollment');privateDirectory(bundleDirectory);
-    const connectionFile=join(bundleDirectory,'connection.json');
+    connectionFile=join(bundleDirectory,'connection.json');
     writeFileSync(join(bundleDirectory,'token'),token+'\n',{mode:0o600,flag:'wx'});
     json(join(bundleDirectory,'enrollment.json'),{format:'psst-enrollment-receipt-v1',protocol_version:'1',broker_url:brokerUrl,client_type:'antigravity-cli',credential_id:credentialId,adapter_id:adapterId,scopes:[scope],expires_at:expiresAt,token_sha256:hash(token)});
     json(connectionFile,{format:'broker-client-bundle-v1',protocol_version:'1',broker_url:brokerUrl,token_file:'token',enrollment_receipt_file:'enrollment.json',file_paths_relative_to:'connection_file_directory',authorization_header:'Authorization',authorization_scheme:'Bearer',insecure_development:false,allowed_client_types:['antigravity-cli'],scope,ca_file:certFile,registration_version:2});
-    const installationDirectory=join(home,'.gemini','antigravity-cli','psst','installation');privateDirectory(installationDirectory);
+    installationDirectory=join(home,'.gemini','antigravity-cli','psst','installation');privateDirectory(installationDirectory);
     json(join(installationDirectory,'selected.json'),{format:'psst-selected-v1',revision:randomUUID(),connectionFile,credentialId,requestId:randomUUID(),brokerUrl});
+    }
     // This hook runs directly under the native shell, keeping real parent provenance.
     // It records only fixture-native identifiers; the original result, including permits,
     // goes directly back to the native CLI and is not persisted in the proof log.
@@ -57,15 +63,17 @@ export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoo
     const hooks={};
     for(const event of ['SessionStart','PreInvocation','Stop'])hooks[event]=[{type:'command',command:`node ${quote(hookFile)} ${event}`,timeout:5}];
     hooks.PreToolUse=[{matcher:'^(call_mcp_tool|run_command)$',hooks:[{type:'command',command:`node ${quote(hookFile)} PreToolUse`,timeout:5}]}];
-    const mcp={mcpServers:{[ACTUAL_SERVER]:{command:'node',args:[join(pluginRoot,'bin/psst-antigravity-native.mjs'),'serve','--experimental-native']}}};
+    const mcp={mcpServers:{[ACTUAL_SERVER]:{command:'node',args:[join(pluginRoot,'bin/psst-antigravity-native.mjs'),'serve','--experimental-native'],env:{NODE_EXTRA_CA_CERTS:certFile}}}};
     let closed=false;
     return {
       brokerUrl,connectionFile,installationDirectory,eventsFile,mcp,hooks:{'offline-actual-psst':hooks},
-      permissions:{allow:[...ACTUAL_TOOLS,...(presence?['broker_presence_events','broker_acknowledge_presence_event']:[]),...(messages?['broker_send','broker_receive','broker_acknowledge']:[])].map(tool=>`mcp(${ACTUAL_SERVER}/${tool})`).concat(wakeup?['command(/usr/local/bin/node /plugin/bin/psst-antigravity-native.mjs wait)']:[])},
+      approveSetup:async requestId=>{assert(approvalFixture,'approval mode required');await approvalFixture.decide(requestId);approvedRequest=requestId;},
+      get enrollmentPostCount(){return approvalFixture?.enrollmentPostCount??0;},
+      permissions:{allow:[...ACTUAL_TOOLS,...(approvalSetup?['broker_setup']:[]),...(presence?['broker_presence_events','broker_acknowledge_presence_event']:[]),...(messages?['broker_send','broker_receive','broker_acknowledge']:[])].map(tool=>`mcp(${ACTUAL_SERVER}/${tool})`).concat(wakeup?['command(/usr/local/bin/node /plugin/bin/psst-antigravity-native.mjs wait)']:[],approvalSetup?['command(/usr/local/bin/node /plugin/bin/psst-antigravity-native.mjs wait-approval)']:[])},
       readEvents:()=>{try{return readFileSync(eventsFile,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);}catch(e){if(e.code==='ENOENT')return [];throw e;}},
       seedMessages(nativeId){
         assert(messages&&!presence,'message fixture mode required');
-        const entry=auth.authenticate('Bearer '+token),peerId=randomUUID();
+        const entry=approvalFixture?approvalFixture.approvedEntry(approvedRequest):auth.authenticate('Bearer '+token),peerId=randomUUID();
         store.own(entry,nativeId);
         const peer=store.register(entry,{protocol_version:'1',registration_version:2,requested_at:Date.now(),client_id:peerId,client_type:'antigravity-cli',session_instance_id:randomUUID(),connection_id:randomUUID(),previous_epoch:0,metadata:{name:'Offline message peer',model:{provider:null,id:null,source:'unknown'},project:null},capabilities:{protocol_version:'1',adapter_version:'fixture',client_type:'antigravity-cli',receive_enabled:true,durable_inbox:true}});
         const incomingText='OFFLINE_NATIVE_MESSAGE_BEGIN\n# Literal peer data: olá, 世界\nOFFLINE_NATIVE_MESSAGE_FULL_TAIL';
@@ -98,7 +106,7 @@ export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoo
         assert.equal(store.receipt(entry,proof.senderId,proof.messageId).delivery_state,'queued');
         assert.equal(store.db.prepare('SELECT COUNT(*) n FROM presence_events WHERE sender=? AND acknowledged=0').get(proof.senderId).n,0);
       },
-      async close(){if(closed)return;closed=true;try{await app.close();}finally{store.close();}},
+      async close(){if(closed)return;closed=true;if(approvalFixture)return approvalFixture.close();try{await app.close();}finally{store.close();}},
     };
-  } catch(error) {try{if(app?.server.listening)await app.close();}finally{store.close();}throw error;}
+  } catch(error) {if(approvalFixture)await approvalFixture.close();else try{if(app?.server.listening)await app.close();}finally{store?.close();}throw error;}
 }
