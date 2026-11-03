@@ -1,4 +1,5 @@
 // Test-only. Must run in a Docker --network none container, never on a user host.
+import {composerState} from './composer-state.mjs';
 import {trustState} from './trust-state.mjs';
 import {TerminalScreen} from './xterm-screen.mjs';
 import {consentState,postConsentState,consentNavigation,navigationRenderState} from './consent-state-navigation.mjs';
@@ -39,19 +40,18 @@ const compactPoll=mode==='compact'?setInterval(()=>{
  if(!themeSelected&&current.includes('Choose your color scheme:')&&/^\s*> terminal(?:\s|$)/m.test(current)){themeSelected=true;child.stdin.write('\r');return;}
  const consent=consentState(current);
  if(termsAcceptanceSent&&!termsAccepted){if(screen.version>acceptScreenVersion&&!consent.terms)termsAccepted=true;else return;}
- if(termsAccepted){
+ if(termsAccepted&&!trustPromptDismissed){
   if(trustConfirmationSent){
    if(screen.version===trustScreenVersion&&Date.now()-trustSentAt<1000)return;
-   trustPromptDismissed=screen.version>trustScreenVersion&&!trustState(current).recognized;
-   consentBlocked=true;consentEvidence.push({action:trustPromptDismissed?'stop_post_trust_composer_unverified':'stop_trust_confirmation_unverified',screen:current});clearInterval(compactPoll);child.kill('SIGTERM');return;
+   if(screen.version>trustScreenVersion&&composerState(current).ready){trustPromptDismissed=true;consentEvidence.push({action:'verified_post_trust_idle_composer',screen:current});}
+   else {consentBlocked=true;consentEvidence.push({action:'stop_post_trust_composer_unverified',screen:current});clearInterval(compactPoll);child.kill('SIGTERM');return;}
+  } else {
+   const trust=trustState(current,{authorizedFixtureWorkspaceTrust:true});
+   if(trust.mayAccept&&collectionUnchecked&&lstatSync(root).isDirectory()&&!lstatSync(root).isSymbolicLink()&&realpathSync(root)==='/tmp/proof'){
+    trustConfirmationSent=true;trustScreenVersion=screen.version;trustSentAt=Date.now();consentEvidence.push({action:'trust_exact_isolated_fixture_workspace',workspace:'/tmp/proof',screen:current});child.stdin.write('\r');return;
+   }
+   consentBlocked=true;consentEvidence.push(postConsentState(current));clearInterval(compactPoll);child.kill('SIGTERM');return;
   }
-  // Specific fixture-only user authorization:
-  // trust ONLY this fresh /tmp/proof inside the isolated fixture, not arbitrary workspaces.
-  const trust=trustState(current,{authorizedFixtureWorkspaceTrust:true});
-  if(trust.mayAccept&&collectionUnchecked&&lstatSync(root).isDirectory()&&!lstatSync(root).isSymbolicLink()&&realpathSync(root)==='/tmp/proof'){
-   trustConfirmationSent=true;trustScreenVersion=screen.version;trustSentAt=Date.now();consentEvidence.push({action:'trust_exact_isolated_fixture_workspace',workspace:'/tmp/proof',screen:current});child.stdin.write('\r');return;
-  }
-  consentBlocked=true;consentEvidence.push(postConsentState(current));clearInterval(compactPoll);child.kill('SIGTERM');return;
  }
  if(consent.terms&&!termsAccepted){
   if(!collectionToggleSent&&consent.mayUncheck){collectionToggleSent=true;consentEvidence.push({action:'uncheck_optional_collection',screen:current});child.stdin.write(' ');return;}
@@ -67,11 +67,12 @@ const compactPoll=mode==='compact'?setInterval(()=>{
   return;
  }
  if(!termsAccepted||screen.version<=acceptScreenVersion||consent.terms)return;
+ if(!trustPromptDismissed||!composerState(current).ready)return;
  if(!existsSync(events)||!existsSync(capture))return;
  const observed=readFileSync(events,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
  const calls=readFileSync(capture,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
  const stops=observed.filter(h=>h.event==='Stop'&&h.fullyIdle===true&&['model_stop','NO_TOOL_CALL'].includes(h.terminationReason));
- if(!compactIssued&&calls.length===1&&stops.length){compactIssued=true;child.stdin.write('/compact\r');}
+ if(!compactIssued&&calls.length===1&&typeof calls[0].meta?.['antigravity.google/root_conversation_id']==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(calls[0].meta['antigravity.google/root_conversation_id'])&&calls[0].meta['antigravity.google/root_conversation_id']===calls[0].meta['antigravity.google/conversation_id']&&stops.some(h=>h.conversationId===calls[0].meta['antigravity.google/root_conversation_id'])){compactIssued=true;child.stdin.write('/compact\r');}
  else if(compactIssued&&!probeIssued&&current.includes('Conversation compacted')){probeIssued=true;toolSent=false;child.stdin.write('Run the synthetic read-only identity probe after compact.\r');}
  else if(probeIssued&&calls.length===2&&stops.some(h=>h.conversationId===calls[1].meta?.['antigravity.google/conversation_id']&&h.conversationId!==calls[0].meta?.['antigravity.google/conversation_id'])&&!stoppedAfterCompact){stoppedAfterCompact=true;child.stdin.write('\x03');compactTimers.push(setTimeout(()=>child.stdin.end(),250));}
 },100):null;
