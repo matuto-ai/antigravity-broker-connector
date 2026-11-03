@@ -69,7 +69,7 @@ export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoo
       brokerUrl,connectionFile,installationDirectory,eventsFile,mcp,hooks:{'offline-actual-psst':hooks},
       approveSetup:async requestId=>{assert(approvalFixture,'approval mode required');await approvalFixture.decide(requestId);approvedRequest=requestId;},
       get enrollmentPostCount(){return approvalFixture?.enrollmentPostCount??0;},
-      permissions:{allow:[...ACTUAL_TOOLS,...(approvalSetup?['broker_setup']:[]),...(presence?['broker_presence_events','broker_acknowledge_presence_event']:[]),...(messages?['broker_send','broker_receive','broker_acknowledge']:[])].map(tool=>`mcp(${ACTUAL_SERVER}/${tool})`).concat(wakeup?['command(/usr/local/bin/node /plugin/bin/psst-antigravity-native.mjs wait)']:[],approvalSetup?['command(/usr/local/bin/node /plugin/bin/psst-antigravity-native.mjs wait-approval)']:[])},
+      permissions:{allow:[...ACTUAL_TOOLS,...(approvalSetup?['broker_setup']:[]),...(presence?['broker_presence_events','broker_acknowledge_presence_event']:[]),...(messages?['broker_send','broker_receive','broker_acknowledge']:[])].map(tool=>`mcp(${ACTUAL_SERVER}/${tool})`).concat(wakeup?["command('/usr/local/bin/node' '/plugin/bin/psst-antigravity-native.mjs' wait)"]:[],approvalSetup?["command('/usr/local/bin/node' '/plugin/bin/psst-antigravity-native.mjs' wait-approval)"]:[])},
       readEvents:()=>{try{return readFileSync(eventsFile,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);}catch(e){if(e.code==='ENOENT')return [];throw e;}},
       seedMessages(nativeId){
         assert(messages&&!presence,'message fixture mode required');
