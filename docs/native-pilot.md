@@ -142,9 +142,11 @@ in that case, rather than inferring it from a generic idle observation.
 Deterministic adapter tests run the actual HTTP broker transport, durable inbox,
 hook-decision/permit boundary, external waiter, FIFO receive/ACK, and disconnect
 races. Official CLI 1.4.7 strict validation recognizes the generated plugin's
-one MCP server, one hook configuration and one skill with no findings. These
-tests still do not prove native permission acceptance, hook-overwrite delivery,
-or interactive idle wakeup. Those remain the explicit user-owned CLI gate.
+one MCP server, one hook configuration and one skill with no findings. Those
+deterministic tests alone do not prove native permission acceptance or hook
+overwrite. The isolated qualification below now establishes those for the exact
+read-only status/identity calls; authenticated interactive idle wakeup remains
+the explicit user-owned CLI gate.
 The official CLI also loaded this actual generated plugin in a disposable
 headless fake-provider run: native discovery exposed `psst-native_psst` and
 `broker_connect`, hooks initialized, and the server remained disconnected with
@@ -211,5 +213,39 @@ send, cancel, setup and other ordinary calls cannot retire or drain the active
 root. Hooks alone never select a root. Retired roots are never evicted or replayed:
 a binding accepts at most 256 retirements during one exact native-host lifetime,
 then refuses further transitions before draining; the active root still works.
-Restarting only MCP does not reset this bound. No actual native `/compact`
-acceptance is implied by these offline changes.
+Restarting only MCP does not reset this bound. The pinned CLI 1.4.7 isolated
+qualification below now verifies actual `/compact` continuity and `/new` root
+rotation; authenticated user-environment wakeup acceptance remains separate.
+
+
+## Isolated native qualification — 2026-11-03
+
+[Verify run 41557793494](https://github.com/matuto-ai/antigravity-broker-connector/actions/runs/41557793494)
+passed at `ee81b5b383fae84f9faf943ccbd8979cb61f2bc1`, including container
+persistence and the installable package. The pinned official CLI **1.4.7** ran
+with a fresh HOME, no external network, a synthetic loopback model provider and
+no user account or files. Optional collection stayed unchecked; only the exact
+disposable `/tmp/proof` workspace was trusted.
+
+Two separate suites establish different facts:
+
+- Native hook/transport metadata: actual root, child and lazy MCP calls; actual
+  interactive `/compact` and `/new`, with matching idle Stop events and clean
+  `/exit`. No synthetic root replacement was used for these observations.
+- Actual production connector plus an ephemeral TLS Psst: only
+  `broker_setup_status` and `broker_identity`, through native `call_mcp_tool`.
+  Responses are strictly correlated to the requested tool and decoded from the
+  observed native hook-notice envelope. `/compact` preserves the conversation,
+  client, journal and generation in this pinned CLI. `/new` changes conversation,
+  client and journal and increments generation once, retaining the same host and
+  MCP owner. Read-only database assertions supplement—not replace—tool responses.
+
+Reproduce with `bash scripts/native-contract-proof/run.sh` and
+`bash scripts/native-contract-proof/run-actual.sh`; the latter requires the
+workflow's exact disposable Psst checkout. Recorded sanitized observations are
+in `scripts/native-contract-proof/recorded-native-acceptance.json`.
+
+This is **not** proof of authenticated vendor-model behavior, the user's installed
+version, or unattended message wakeup. Actual send/receive/ACK, idle/busy wakeup,
+permission rejection, disconnect/restart and conversation-only cleanup remain
+separate live acceptance gates. No release or 1.0 readiness is implied.
