@@ -25,7 +25,7 @@ const fixture=await prepareActualPluginFixture({root,home,pluginRoot:'/plugin',b
 const events=fixture.eventsFile;
 writeFileSync(home+'/.gemini/config/hooks.json',JSON.stringify(fixture.hooks));
 writeFileSync(home+'/.gemini/config/mcp_config.json',JSON.stringify(fixture.mcp));
-let turn={sent:0,completed:0},providerFailure=null;const requests=[],identities=[],snapshots=[];
+let turn={sent:0,completed:0},providerFailure=null,providerDiagnostics=null;const requests=[],identities=[],snapshots=[];
 function snapshot(identity){
  const base=home+'/.config/psst/antigravity/native';
  const owners=readdirSync(base).map(name=>base+'/'+name).filter(path=>existsSync(path+'/owner.json'));
@@ -39,12 +39,22 @@ function snapshot(identity){
  try{admittedRoot=bindingDb.prepare('SELECT conversation FROM binding WHERE id=1').get()?.conversation;const state=bindingDb.prepare('SELECT generation,strict_admission_required FROM root_state WHERE id=1').get();assert.equal(admittedRoot,identity.conversation_id);assert.equal(state.strict_admission_required,1);rootGeneration=state.generation;}finally{bindingDb.close();}
  return {admittedRoot,rootGeneration,host:owner.host,connectorProcess:owner.connectorProcess,ownerEpoch:owner.ownerEpoch,conversationId:session.conversationId,clientId:session.clientId,inboxPath:session.inboxPath};
 }
+function diagnosticNativeState(){
+ try{
+  const base=home+'/.config/psst/antigravity/native';
+  const owners=readdirSync(base).map(name=>base+'/'+name).filter(path=>existsSync(path+'/owner.json'));
+  if(owners.length!==1)return {ownerCount:owners.length};
+  const session=JSON.parse(readFileSync(owners[0]+'/session.json','utf8'));
+  const db=new DatabaseSync(owners[0]+'/binding.sqlite',{readOnly:true});
+  try{const bound=db.prepare('SELECT conversation FROM binding WHERE id=1').get();const state=db.prepare('SELECT generation,strict_admission_required FROM root_state WHERE id=1').get();return {ownerCount:1,connected:session.connected===true,disabled:session.disabled===true,nativeBound:typeof bound?.conversation==='string',generation:state?.generation,strictAdmission:state?.strict_admission_required===1,selectionExists:existsSync(fixture.installationDirectory+'/selected.json')};}finally{db.close();}
+ }catch{return {stateReadable:false};}
+}
 const provider=createServer(async(req,res)=>{if(requests.length>=20){res.writeHead(429);res.end();return;}let b='';for await(const c of req){b+=c;if(b.length>2097152){res.writeHead(413);res.end();return;}}const input=JSON.parse(b||'{}');requests.push({path:req.url,hasTools:Array.isArray(input.tools)});let response;
  if(req.url.toLowerCase().includes('counttokens'))response={totalTokens:1};
  else {let parts;
  try {const step=actualProviderStep(input,turn);turn=step.state;parts=step.parts;
   if(step.identity){identities.push(step.identity);snapshots.push(snapshot(step.identity));}
- } catch(error){providerFailure=error.message;parts=[{text:'OFFLINE_ACTUAL_PROOF_FAILED'}];}
+ } catch(error){providerFailure=error.message;providerDiagnostics={response:error.proofDiagnostics??null,nativeState:diagnosticNativeState()};parts=[{text:'OFFLINE_ACTUAL_PROOF_FAILED'}];}
  requests.at(-1).tool=parts[0]?.functionCall?.args?.ToolName;
  response={candidates:[{content:{role:'model',parts},finishReason:'STOP'}],usageMetadata:{promptTokenCount:1,candidatesTokenCount:1,totalTokenCount:2}};}
  const sse=req.url.includes('alt=sse');res.writeHead(200,{'content-type':sse?'text/event-stream':'application/json'});res.end(sse?'data: '+JSON.stringify(response)+'\n\n':JSON.stringify(req.url.toLowerCase().includes('streamgenerate')?[response]:response));});
@@ -96,7 +106,7 @@ await fixture.close();
 const expected=interactive?2:1;
 const actualVerified=!providerFailure&&identities.length===expected&&snapshots.length===expected&&hook.every(h=>!h.denied)&&identities.every(id=>hook.some(h=>h.event==='PreToolUse'&&h.tool==='broker_identity'&&h.conversationId===id.conversation_id&&h.environmentConversationId===id.conversation_id));
 const compactVerified=!interactive||compactIssued&&probeIssued&&stoppedAfterCompact&&(mode==='new'?actualRootRotation(identities,snapshots):actualCompactContinuity(identities,snapshots));
-console.log(JSON.stringify({mode,actualVerified,compactVerified,providerFailure,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence,terminalScreen:screen.text(),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:err.slice(-2000),acceptance:actualVerified&&compactVerified?'actual_plugin_native_identity_verified':'actual_plugin_native_identity_unverified'}));
+console.log(JSON.stringify({mode,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence,terminalScreen:screen.text(),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:err.slice(-2000),acceptance:actualVerified&&compactVerified?'actual_plugin_native_identity_verified':'actual_plugin_native_identity_unverified'}));
 assert(!parserFailed&&!timedOut&&!overflow,'native fixture diagnostics failed');
 assert([0,130].includes(code),'native fixture exit');
 assert(actualVerified,'actual plugin native identity unverified; no permission bypass');

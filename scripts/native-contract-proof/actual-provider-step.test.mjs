@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {actualProviderStep} from './actual-provider-step.mjs';
+import {actualProviderStep,actualResponseDiagnostics} from './actual-provider-step.mjs';
 const tools=[{functionDeclarations:[{name:'call_mcp_tool',parameters:{properties:{ServerName:{type:'string'},ToolName:{type:'string'},Arguments:{type:'object'}}}}]}];
 const input=response=>({tools,contents:response?[{role:'user',parts:[{functionResponse:{name:'call_mcp_tool',response:{content:[{type:'text',text:JSON.stringify(response)}]}}}]}]:[]});
 test('only real status then identity and projects safe identity fields',()=>{
@@ -18,4 +18,10 @@ test('refuses missing schema, missing response, disconnected status, synthetic i
 test('native no-tools warmup is benign without advancing state; pending response still required',()=>{
  const state={sent:0,completed:0};for(const data of [{},{tools:[]},{tools:[{functionDeclarations:[]}]}]){const result=actualProviderStep(data,state);assert.deepEqual(result.state,state);assert.equal(result.parts[0].text,'OFFLINE_ACTUAL_PROBE_READY');}
  assert.throws(()=>actualProviderStep({}, {sent:1,completed:0}),/missing native tool response/);
+});
+
+test('status diagnostics expose only allowlisted classification, never secrets or raw text',()=>{
+ const secret='secret-token-and-permit';const value={unexpected:secret,content:[{type:'text',text:'```json\n{"connected":false,"mode":"automatic_required","state":"attention_required","token":"'+secret+'"}\n```'},{type:'text',text:'native_binding_rejected '+secret}],isError:true};
+ const diag=actualResponseDiagnostics(value);assert(!JSON.stringify(diag).includes(secret));assert(diag.textShape.fencedJson);assert(diag.textShape.hasConnectedFalse);assert.deepEqual(diag.knownErrors,['native_binding_rejected']);
+ assert.throws(()=>actualProviderStep(input({connected:false,state:'attention_required',token:secret}),{sent:1,completed:0}),error=>error.proofDiagnostics.connected[0]===false&&!JSON.stringify(error.proofDiagnostics).includes(secret));
 });
