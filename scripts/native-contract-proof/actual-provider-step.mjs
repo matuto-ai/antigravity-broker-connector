@@ -17,7 +17,7 @@ export function nativeNoticeShape(text){
  const shape=tokens.slice(0,96).map(token=>words.has(token)?token:token==='\n'?'\n':/^\s$/.test(token)?' ':punctuation.has(token)?token:'?').join('').replace(/ +/g,' ').trim();
  let trailingObject=false;
  if(start>=0){try{const value=JSON.parse(text.slice(start));trailingObject=Boolean(value&&typeof value==='object'&&!Array.isArray(value));}catch{}}
- return {shape,prefixTruncated:(start<0?text.length:start)>512||tokens.length>96,hasObjectStart:start>=0,trailingObject};
+ return {shape,prefixTruncated:(start<0?text.length:start)>512||tokens.length>96,hasObjectStart:start>=0,trailingObject,createdHeader:/^Created At:/.test(text),completedHeader:/\nCompleted At:/.test(text)};
 }
 // Diagnostics never return arbitrary keys, text, URLs, paths, IDs, tokens or permits.
 export function actualResponseDiagnostics(value){
@@ -35,12 +35,38 @@ export function actualResponseDiagnostics(value){
   textShape:{strings:strings.length,jsonParseable:strings.filter(v=>{try{JSON.parse(v);return true;}catch{return false;}}).length,
    fencedJson:strings.some(v=>/```(?:json)?\s*[\[{]/i.test(v)),hasConnectedTrue:strings.some(v=>/"connected"\s*:\s*true/.test(v)),hasConnectedFalse:strings.some(v=>/"connected"\s*:\s*false/.test(v)),hasAutomaticMode:strings.some(v=>/"mode"\s*:\s*"automatic_required"/.test(v))}};
 }
+const nativeNotice='A pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.';
+const time='(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]';
+const envelope=new RegExp('^Created At: '+time+'\\nCompleted At: '+time+'\\n'+nativeNotice.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\n{1,2}');
+export function decodeNativeToolResponse(value){
+ if(!value||typeof value!=='object'||Array.isArray(value)||!Object.hasOwn(value,'output'))throw Error('unsupported_native_response_envelope');
+ if(Object.keys(value).length!==1||typeof value.output!=='string'||Buffer.byteLength(value.output)>65536)throw Error('unsupported_native_response_envelope');
+ const match=envelope.exec(value.output);if(!match)throw Error('unsupported_native_response_envelope');
+ const body=value.output.slice(match[0].length);if(!body.startsWith('{'))throw Error('invalid_native_response_json');
+ let parsed;try{parsed=JSON.parse(body);}catch{throw Error('invalid_native_response_json');}
+ if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)||parsed.error||parsed.isError===true)throw Error('invalid_native_response_json');
+ return parsed;
+}
+export function correlateNativeResponse(input,expectedTool){
+ const parts=(input.contents??[]).flatMap(c=>(c.parts??[]).map(p=>({...p,role:c.role})));
+ const index=parts.findLastIndex(p=>p.functionResponse?.name==='call_mcp_tool');
+ assert(index>=0,'missing native tool response');
+ const response=parts[index].functionResponse;
+ const modelPart=parts.slice(0,index).findLast(p=>p.functionCall);
+ assert(modelPart?.role==='model','native response model call missing');
+ const call=modelPart.functionCall;
+ assert(call?.name==='call_mcp_tool'&&call.args?.ServerName===ACTUAL_SERVER&&call.args?.ToolName===expectedTool,'native response call mismatch');
+ if(call.id!==undefined||response.id!==undefined)assert(typeof call.id==='string'&&call.id===response.id,'native response id mismatch');
+ return response.response;
+}
 export function actualProviderStep(input,state){
  const next={...state};let identity;
  const responses=(input.contents??[]).flatMap(c=>c.parts??[]).filter(p=>p.functionResponse?.name==='call_mcp_tool').map(p=>p.functionResponse.response);
  if(next.sent>next.completed){
   assert(responses.length,'missing native tool response');
-  const found=objects(responses.at(-1));
+  correlateNativeResponse(input,ACTUAL_TOOLS[next.completed]);
+  let decoded;try{decoded=decodeNativeToolResponse(responses.at(-1));}catch(error){error.proofDiagnostics=actualResponseDiagnostics(responses.at(-1));throw error;}
+  const found=[decoded];
   if(next.completed===0){if(!found.some(v=>v.connected===true&&v.mode==='automatic_required'))throw Object.assign(Error('actual setup status not connected'),{proofDiagnostics:actualResponseDiagnostics(responses.at(-1))});}
   else {const value=found.find(v=>v.native_session_binding===true&&v.endpoint_scope==='experimental_native_conversation'&&uuid.test(v.conversation_id??'')&&typeof v.client_id==='string');
    assert(value,'actual identity response missing');identity={conversation_id:value.conversation_id,client_id:value.client_id,native_session_binding:true,endpoint_scope:value.endpoint_scope};}
