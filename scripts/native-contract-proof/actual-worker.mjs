@@ -1,6 +1,7 @@
 // Test-only. Must run in a Docker --network none container, never on a user host.
 import {prepareActualPluginFixture} from './actual-plugin-fixture.mjs';
 import {actualCompactContinuity,actualRootRotation,matchingIdleStop} from './actual-compact-state.mjs';
+import {presenceProviderStep} from './presence-provider-step.mjs';
 import {actualProviderStep} from './actual-provider-step.mjs';
 import {composerState} from './composer-state.mjs';
 import {trustState} from './trust-state.mjs';
@@ -17,15 +18,15 @@ assert.deepEqual(Object.keys(networkInterfaces()).filter(name=>name!=='lo'),[],'
 for(const line of readFileSync('/proc/net/route','utf8').trim().split('\n').slice(1))assert.equal(line.trim().split(/\s+/)[0],'lo','external IPv4 route');
 for(const line of readFileSync('/proc/net/ipv6_route','utf8').trim().split('\n').filter(Boolean))assert.equal(line.trim().split(/\s+/).at(-1),'lo','external IPv6 route');
 assert.equal(process.env.HOME,'/tmp/proof-home');
-const mode=process.argv[2]??'root';assert(['root','compact','new'].includes(mode));
+const mode=process.argv[2]??'root';assert(['root','compact','new','presence'].includes(mode));
 const interactive=['compact','new'].includes(mode);
 const home='/tmp/proof-home',root='/tmp/proof';mkdirSync(root,{mode:0o700});mkdirSync(home+'/.gemini/antigravity-cli',{recursive:true,mode:0o700});mkdirSync(home+'/.gemini/config',{recursive:true,mode:0o700});
 assert(lstatSync(root).isDirectory()&&!lstatSync(root).isSymbolicLink()&&realpathSync(root)==='/tmp/proof','fresh_fixture_workspace_required');
-const fixture=await prepareActualPluginFixture({root,home,pluginRoot:'/plugin',brokerRoot:'/psst',tlsDirectory:'/fixture-tls'});
+const fixture=await prepareActualPluginFixture({root,home,pluginRoot:'/plugin',brokerRoot:'/psst',tlsDirectory:'/fixture-tls',presence:mode==='presence'});
 const events=fixture.eventsFile;
 writeFileSync(home+'/.gemini/config/hooks.json',JSON.stringify(fixture.hooks));
 writeFileSync(home+'/.gemini/config/mcp_config.json',JSON.stringify(fixture.mcp));
-let turn={sent:0,completed:0},providerFailure=null,providerDiagnostics=null;const requests=[],identities=[],snapshots=[];
+let turn={sent:0,completed:0},presenceState={sent:0,completed:0},presenceProof=null,providerFailure=null,providerDiagnostics=null;const requests=[],identities=[],snapshots=[];
 function snapshot(identity){
  const base=home+'/.config/psst/antigravity/native';
  const owners=readdirSync(base).map(name=>base+'/'+name).filter(path=>existsSync(path+'/owner.json'));
@@ -52,8 +53,8 @@ function diagnosticNativeState(){
 const provider=createServer(async(req,res)=>{if(requests.length>=20){res.writeHead(429);res.end();return;}let b='';for await(const c of req){b+=c;if(b.length>2097152){res.writeHead(413);res.end();return;}}const input=JSON.parse(b||'{}');requests.push({path:req.url,hasTools:Array.isArray(input.tools)});let response;
  if(req.url.toLowerCase().includes('counttokens'))response={totalTokens:1};
  else {let parts;
- try {const step=actualProviderStep(input,turn);turn=step.state;parts=step.parts;
-  if(step.identity){identities.push(step.identity);snapshots.push(snapshot(step.identity));}
+ try {const step=mode==='presence'&&turn.completed===2?presenceProviderStep(input,presenceState,presenceProof):actualProviderStep(input,turn);if(mode==='presence'&&turn.completed===2&&!step.identity)presenceState=step.state;else turn=step.state;parts=step.parts;
+  if(step.identity){identities.push(step.identity);snapshots.push(snapshot(step.identity));if(mode==='presence'){presenceProof=fixture.seedPresence(step.identity.client_id);const next=presenceProviderStep(input,presenceState,presenceProof);presenceState=next.state;parts=next.parts;}}
  } catch(error){providerFailure=error.message;providerDiagnostics={response:error.proofDiagnostics??null,nativeState:diagnosticNativeState()};parts=[{text:'OFFLINE_ACTUAL_PROOF_FAILED'}];}
  requests.at(-1).tool=parts[0]?.functionCall?.args?.ToolName;
  response={candidates:[{content:{role:'model',parts},finishReason:'STOP'}],usageMetadata:{promptTokenCount:1,candidatesTokenCount:1,totalTokenCount:2}};}
@@ -102,11 +103,13 @@ const compactPoll=interactive?setInterval(()=>{
 },100):null;
 const timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL');},30000);const code=await new Promise(resolve=>child.once('close',resolve));clearTimeout(timer);clearInterval(compactPoll);for(const t of compactTimers)clearTimeout(t);provider.close();
 const hook=fixture.readEvents();
+if(mode==='presence'&&!providerFailure&&presenceState.completed===2)fixture.verifyPresenceAck(presenceProof);
 await fixture.close();
 const expected=interactive?2:1;
-const actualVerified=!providerFailure&&identities.length===expected&&snapshots.length===expected&&hook.every(h=>!h.denied)&&identities.every(id=>hook.some(h=>h.event==='PreToolUse'&&h.tool==='broker_identity'&&h.conversationId===id.conversation_id&&h.environmentConversationId===id.conversation_id));
+const presenceVerified=mode!=='presence'||presenceState.completed===2;
+const actualVerified=presenceVerified&&!providerFailure&&identities.length===expected&&snapshots.length===expected&&hook.every(h=>!h.denied)&&identities.every(id=>hook.some(h=>h.event==='PreToolUse'&&h.tool==='broker_identity'&&h.conversationId===id.conversation_id&&h.environmentConversationId===id.conversation_id));
 const compactVerified=!interactive||compactIssued&&probeIssued&&stoppedAfterCompact&&(mode==='new'?actualRootRotation(identities,snapshots):actualCompactContinuity(identities,snapshots));
-console.log(JSON.stringify({mode,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence,terminalScreen:screen.text(),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:err.slice(-2000),acceptance:actualVerified&&compactVerified?'actual_plugin_native_identity_verified':'actual_plugin_native_identity_unverified'}));
+console.log(JSON.stringify({mode,presenceVerified,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence,terminalScreen:screen.text(),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:err.slice(-2000),acceptance:actualVerified&&compactVerified?'actual_plugin_native_identity_verified':'actual_plugin_native_identity_unverified'}));
 assert(!parserFailed&&!timedOut&&!overflow,'native fixture diagnostics failed');
 assert([0,130].includes(code),'native fixture exit');
 assert(actualVerified,'actual plugin native identity unverified; no permission bypass');

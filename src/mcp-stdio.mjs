@@ -1,3 +1,4 @@
+import { readablePresence } from './presence-notices.mjs';
 // Adapted from the pinned Psst MCP transport. Extension: cooperative receipt and identity tools.
 import { StringDecoder } from 'node:string_decoder';
 import { readableReceive } from './receive-presentation.mjs';
@@ -149,7 +150,7 @@ export function serveStdio({ input = process.stdin, output = process.stdout, too
       }
       if (nativeTransportMetadata) responseState.guard = () => false;
       const result = await invokeTool(tools, p.name, p.arguments ?? {}, context);
-      const presented = readableNativeReceive && p.name === 'broker_receive' ? readableReceive(result) : null;
+      const presented = readableNativeReceive && p.name === 'broker_receive' ? readableReceive(result) : readableNativeReceive && p.name === 'broker_presence_events' ? readablePresence(result) : null;
       return sendResponse({ jsonrpc: '2.0', id, result: presented ?? { content: [{ type: 'text', text: canonical(result) }], isError: Boolean(result?.error) } }, presented ? maxReceiveResponseBytes : maxResponseBytes);
     }
     return errorResponse(id, -32601, 'Method not supported by this tools-only stdio server.');

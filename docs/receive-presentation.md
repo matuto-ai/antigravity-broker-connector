@@ -40,3 +40,41 @@ can replace a large result with a file reference. Existing native permissions
 apply to reading that result. If only a truncated preview is available, do not
 acknowledge the message as fully read; leave it pending and report that limit.
 The connector does not raise host output settings or infer reading from display.
+
+## Separate prolonged-offline transport notices
+
+With a broker advertising `presence_events`, the native owner polls a separate
+bounded transport journal every 30 seconds. `broker_presence_events` refreshes
+and returns up to ten notices with readable text and complete structured event
+metadata. Drain batches by explicitly acknowledging only event IDs actually
+read with `broker_acknowledge_presence_event`. This is distinct from
+`broker_receive` / `broker_acknowledge`, which still handle agent messages.
+Older brokers are supported without presence HTTP calls.
+
+The broker, not the connector, chooses the offline grace and stable absence
+identity. A notice exposes recipient/message IDs, queued/claimed state,
+uncertainty and timestamps, never message bodies. It is not a reply timeout or
+proof of non-delivery. It never resends, cancels or closes a session.
+
+The existing conversation-bound background waiter can announce a pending
+transport notice separately from a pending agent message. Two notices and one
+attention warning per event are allowed; then automatic wake retries stop.
+A waiter completion and a tool response are **not native acceptance or model-read
+proof**. Only an explicit event ACK records durable intent and retries the
+broker acknowledgment after a lost response. Reading or displaying does not ACK.
+
+Shutdown cancels and drains polls. Incomplete/capacity-limited scans never prune
+unseen pending events. Up to 256 events are cached; overflow remains at the broker
+and explicit ACKs free room. A complete fresh scan removes obsolete local
+pending events, including reconnect and completed/cancelled delivery cases.
+Current ownership/root fences apply to both tools, and notice state never moves
+between mailboxes. The waiter reads local state and can race a reconnect; always
+refresh with the read tool before treating a pending notice as current.
+
+`test/presence-native.test.mjs` proves real broker HTTP, native-bound MCP wire,
+waiter budgeting, and explicit ACK separation with synthetic host identities.
+The isolated official CLI qualification has a `presence` mode to verify readable
+notice text reaches the fake provider context and that explicit ACK preserves
+queued mail. Running that mode is separate evidence from unit/wire tests.
+Unattended native idle wakeup and authenticated vendor-model acceptance remain
+unverified; this change does not certify those gates or close installation #8.

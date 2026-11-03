@@ -36,6 +36,8 @@ export const NATIVE_DEFINITIONS=[
  {name:'broker_cancel_setup',description:'Cancel local pending setup/resume, keeping existing approved authorization.',inputSchema:shape({})},
  {name:'broker_connect',description:'Explicitly connect this native conversation using a PRIVATE pairing_file path or connection_file path, never secret text. Experimental native wakeup is not certified.',inputSchema:shape({pairing_file:{type:'string',maxLength:4096},connection_file:{type:'string',maxLength:4096}})},
  {name:'broker_disconnect',description:'Disconnect this conversation and cancel its waiter. Does not revoke the installation credential.',inputSchema:shape({})},
+ {name:'broker_presence_events',description:'Read pending transport notices, separate from agent messages. No reply timeout or proof of non-delivery. Explicit event acknowledgment is required; drain batches while has_more.',inputSchema:shape({})},
+ {name:'broker_acknowledge_presence_event',description:'Explicitly acknowledge a previously read transport event_id. Does not acknowledge any message, resend, cancel or close sessions.',inputSchema:{...shape({event_id:{type:'string',format:'uuid',maxLength:36}}),required:['event_id']}},
  ...TOOL_DEFINITIONS,
 ].map(d=>({...d,inputSchema:{...d.inputSchema,properties:{...d.inputSchema.properties,__psst_permit:{type:'string',format:'uuid',maxLength:36}}}}));
 
