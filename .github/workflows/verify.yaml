@@ -41,7 +41,7 @@ jobs:
           bash scripts/validate-official-native.sh
           qualification_status=0
           bash scripts/native-contract-proof/run.sh || qualification_status=1
-          bash scripts/native-contract-proof/run-actual.sh || qualification_status=1
+          bash scripts/native-contract-proof/run-actual.sh "$PWD" baseline || qualification_status=1
           exit "$qualification_status"
         working-directory: antigravity-review-pair
       - name: Verify container persistence
@@ -49,4 +49,7 @@ jobs:
         working-directory: antigravity-review-pair
       - name: Verify installable package
         run: npm run test:pack
+        working-directory: antigravity-review-pair
+      - name: Verify automatic native setup and arrival
+        run: bash scripts/native-contract-proof/run-actual.sh "$PWD" automatic
         working-directory: antigravity-review-pair

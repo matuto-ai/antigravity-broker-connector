@@ -42,3 +42,9 @@ unexecuted original acceptance check, not a request to provision credentials or
 deploy a new service. Existing owner-reported successful installation and
 bidirectional messages are retained as evidence for that tested pair, without
 turning them into proof of every later version, restart or wakeup race.
+
+## Observed native permission blocker
+
+At candidate `e48fc203`, [CI run 41740931945](https://github.com/matuto-ai/antigravity-psst-connector/actions/runs/41740931945) passed all existing native modes, then all three extended modes reached the normal `Run this command?` prompt for the exact production waiter. No waiter process executed and no command approval was submitted. A quoted and unquoted narrow fixture prefix both required this prompt in CLI 1.4.7. This is a pending native permission, not a transport failure or a missing model credential.
+
+The harness now stops immediately at that boundary rather than waiting for a timeout. It does not select Yes, Always Allow, or a different execution mode. Automatic-arrival qualification remains a mandatory failing CI stage; container persistence and package checks run before it so unrelated evidence remains available. Completion requires authorization for the exact one-shot disposable waiter action, followed by the remaining runtime observations.
