@@ -8,6 +8,17 @@ function objects(value,depth=0){
  if(!value||typeof value!=='object')return [];
  return [value,...Object.values(value).flatMap(v=>objects(v,depth+1))];
 }
+// Header diagnostics expose format only, never timestamps or arbitrary header text.
+export function nativeHeaderFormat(text){
+ const project=value=>[...value.slice(0,64)].map(c=>/[0-9]/.test(c)?'d':':. Z+-'.includes(c)?c:'?').join('');
+ const created=/^Created At:([^\r\n]*)([\r\n]+)Completed At:([^\r\n]*)([\r\n]+)/.exec(text);
+ if(!created)return {matchedHeaders:false};
+ const after=text.slice(created[0].length),notice='A pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.';
+ const noticeBreak=after.startsWith(notice)?/^([\r\n]+)\{/.exec(after.slice(notice.length)):null;
+ return {matchedHeaders:true,createdShape:project(created[1]),completedShape:project(created[3]),createdTruncated:created[1].length>64,completedTruncated:created[3].length>64,
+  headerNewlines:(created[2].match(/\n/g)??[]).length,noticeNewlines:(created[4].match(/\n/g)??[]).length,bodyNewlines:noticeBreak?(noticeBreak[1].match(/\n/g)??[]).length:null,
+  carriageReturns:[created[2],created[4],noticeBreak?.[1]??''].map(v=>(v.match(/\r/g)??[]).length)};
+}
 // Prefix display is a fixed vocabulary projection, not arbitrary string logging.
 export function nativeNoticeShape(text){
  const start=text.indexOf('{'),prefix=(start<0?text:text.slice(0,start)).slice(0,512);
@@ -17,7 +28,7 @@ export function nativeNoticeShape(text){
  const shape=tokens.slice(0,96).map(token=>words.has(token)?token:token==='\n'?'\n':/^\s$/.test(token)?' ':punctuation.has(token)?token:'?').join('').replace(/ +/g,' ').trim();
  let trailingObject=false;
  if(start>=0){try{const value=JSON.parse(text.slice(start));trailingObject=Boolean(value&&typeof value==='object'&&!Array.isArray(value));}catch{}}
- return {shape,prefixTruncated:(start<0?text.length:start)>512||tokens.length>96,hasObjectStart:start>=0,trailingObject,createdHeader:/^Created At:/.test(text),completedHeader:/\nCompleted At:/.test(text)};
+ return {shape,headerFormat:nativeHeaderFormat(text),prefixTruncated:(start<0?text.length:start)>512||tokens.length>96,hasObjectStart:start>=0,trailingObject,createdHeader:/^Created At:/.test(text),completedHeader:/\nCompleted At:/.test(text)};
 }
 // Diagnostics never return arbitrary keys, text, URLs, paths, IDs, tokens or permits.
 export function actualResponseDiagnostics(value){
@@ -26,7 +37,7 @@ export function actualResponseDiagnostics(value){
  collect(value);
  const states=['setup_needed','attention_required','pending','approved','connected','cancelled','denied','expired'];
  const errors=['native_binding_rejected','native_root_context_rejected','native_root_setup_required','native_not_connected','native_host_unavailable','native_owner_unavailable','invalid_connector_configuration','invalid_installation_selection','installation_identity_changed','unauthenticated','forbidden','invalid_response','internal_error'];
- return {responseType:Array.isArray(value)?'array':typeof value,parsedObjects:all.length,wrapperKeys:Object.fromEntries(['output','result','content','text','error','data','response'].map(key=>[key,Boolean(value&&typeof value==='object'&&Object.hasOwn(value,key))])),noticeShapes:strings.slice(0,8).map(nativeNoticeShape),
+ return {responseType:Array.isArray(value)?'array':typeof value,parsedObjects:all.length,wrapperKeyCount:value&&typeof value==='object'?Object.keys(value).length:0,wrapperKeys:Object.fromEntries(['output','result','content','text','error','data','response'].map(key=>[key,Boolean(value&&typeof value==='object'&&Object.hasOwn(value,key))])),noticeShapes:strings.slice(0,8).map(nativeNoticeShape),
   connected:all.filter(v=>typeof v.connected==='boolean').map(v=>v.connected).slice(0,8),
   modes:all.filter(v=>v.mode==='automatic_required').map(()=> 'automatic_required').slice(0,8),
   states:[...new Set(all.map(v=>v.state).filter(v=>states.includes(v)))],

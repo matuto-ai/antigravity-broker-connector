@@ -71,3 +71,11 @@ test('no legacy envelope fallback or nested fake connected status is accepted',a
  for(const value of [{connected:true},{content:[{text:'{"connected":true}'}]},null,[]])assert.throws(()=>decodeNativeToolResponse(value),/unsupported_native_response_envelope/);
  assert.throws(()=>actualProviderStep(input({nested:{connected:true,mode:'automatic_required'}}),{sent:1,completed:0}),/actual setup status not connected/);
 });
+
+test('header format diagnostics mask all digits and unknown text, count exact separators',async()=>{
+ const {nativeHeaderFormat}=await import('./actual-provider-step.mjs');
+ const text='Created At: 2026-11-03 01:03:45.123Z\n\nCompleted At: 01:03:46+01:00\nA pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.\n\n{}';
+ const d=nativeHeaderFormat(text);assert.equal(d.createdShape,' dddd-dd-dd dd:dd:dd.dddZ');assert.equal(d.completedShape,' dd:dd:dd+dd:dd');assert.equal(d.headerNewlines,2);assert.equal(d.noticeNewlines,1);assert.equal(d.bodyNewlines,2);assert.deepEqual(d.carriageReturns,[0,0,0]);
+ const wire=JSON.stringify(nativeHeaderFormat(text.replace('2026-11-03 01:03:45.123Z','SECRET/token')));assert(!wire.includes('SECRET'));assert(!wire.includes('token'));assert.deepEqual(nativeHeaderFormat('other header secret'),{matchedHeaders:false});
+ assert.equal(actualResponseDiagnostics({output:text,extra:'SECRET'}).wrapperKeyCount,2);
+});
