@@ -28,11 +28,11 @@ fencing, bounded per-head notices and unchanged pending journals. Real HTTPS
 approval tests exercise the actual broker/admin UI and frozen helper. They use
 synthetic native identities and do NOT establish authenticated vendor wakeup.
 
-A fresh actual interactive CLI launch stopped at its Google OAuth / Google Cloud
+An earlier actual interactive CLI launch stopped at its Google OAuth / Google Cloud
 project sign-in chooser. No sign-in choice, account, Terms acceptance or model
 call was made. Earlier headless MCP permission denial remains a failure gate,
-not an invitation to use skip-permission flags. Current environment also denies
-Unix socket binding; those three existing tests remain enabled for Linux CI.
+not an invitation to use skip-permission flags. The earlier local environment denied
+Unix socket binding; those tests remained enabled and now pass in Linux CI.
 
 ## Reproducible authenticated acceptance (still required)
 
@@ -47,11 +47,13 @@ native host and restart with the installation directory retained. Verify no
 human-permission inference from message text and no duplicate model processing.
 Stop on a native denial; do not alter authorization to force this test through.
 
-The first-conversation-per-CLI-host fence is deliberate: concurrent independent
-hosts work; switching conversations inside one host is not certified. A documented
-conversation-only close event has not been established, so host exit/disconnect
-is the verified cleanup boundary. Do not advertise all native acceptance gates
-as complete until those observations are recorded.
+Trusted root/self MCP transport IDs now permit serialized new-root transitions
+within a host. Each new root receives a fresh mailbox; old journals and installation
+authorization remain intact. Child calls, stale permits and retired roots cannot
+select an owner. Local tests cover real HTTP pending-message retention and synthetic
+native transport context, not authenticated `/compact` or idle-wakeup acceptance.
+A documented conversation-only close event remains unestablished. Do not advertise
+all native acceptance gates as complete until those observations are recorded.
 
 The native task arguments are taken from the installed host's schema. The plugin
 asks only for `CommandLine` and `WaitMsBeforeAsync=500`; it does not invent an
@@ -67,3 +69,49 @@ Earlier missing-path/parser/owner-lock failures remain installation usability
 findings; the later same-path success means a universal `@` parser limitation
 must not be inferred. The read-only installation doctor now checks the actual
 root and gives the in-session slash command without source copying or policy changes.
+
+### Narrow root-transition admission
+
+The first verified root may use the existing identity-first startup flow. Once a
+root is active, a different verified root must first call `broker_setup_status`
+(or explicitly `broker_connect`) to select its independent mailbox. Identity,
+send, cancel, setup and other ordinary calls cannot retire or drain the active
+root. Hooks alone never select a root. Retired roots are never evicted or replayed:
+a binding accepts at most 256 retirements during one exact native-host lifetime,
+then refuses further transitions before draining; the active root still works.
+Restarting only MCP does not reset this bound. The pinned CLI 1.4.7 isolated
+qualification below now verifies actual `/compact` continuity and `/new` root
+rotation; authenticated user-environment wakeup acceptance remains separate.
+
+
+## Isolated native qualification — 2026-11-03
+
+[Verify run 41557793494](https://github.com/matuto-ai/antigravity-broker-connector/actions/runs/41557793494)
+passed at `ee81b5b383fae84f9faf943ccbd8979cb61f2bc1`, including container
+persistence and the installable package. The pinned official CLI **1.4.7** ran
+with a fresh HOME, no external network, a synthetic loopback model provider and
+no user account or files. Optional collection stayed unchecked; only the exact
+disposable `/tmp/proof` workspace was trusted.
+
+Two separate suites establish different facts:
+
+- Native hook/transport metadata: actual root, child and lazy MCP calls; actual
+  interactive `/compact` and `/new`, with matching idle Stop events and clean
+  `/exit`. No synthetic root replacement was used for these observations.
+- Actual production connector plus an ephemeral TLS Psst: only
+  `broker_setup_status` and `broker_identity`, through native `call_mcp_tool`.
+  Responses are strictly correlated to the requested tool and decoded from the
+  observed native hook-notice envelope. `/compact` preserves the conversation,
+  client, journal and generation in this pinned CLI. `/new` changes conversation,
+  client and journal and increments generation once, retaining the same host and
+  MCP owner. Read-only database assertions supplement—not replace—tool responses.
+
+Reproduce with `bash scripts/native-contract-proof/run.sh` and
+`bash scripts/native-contract-proof/run-actual.sh`; the latter requires the
+workflow's exact disposable Psst checkout. Recorded sanitized observations are
+in `scripts/native-contract-proof/recorded-native-acceptance.json`.
+
+This is **not** proof of authenticated vendor-model behavior, the user's installed
+version, or unattended message wakeup. Actual send/receive/ACK, idle/busy wakeup,
+permission rejection, disconnect/restart and conversation-only cleanup remain
+separate live acceptance gates. No release or 1.0 readiness is implied.

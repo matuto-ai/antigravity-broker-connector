@@ -1,10 +1,13 @@
 // Feature-gated native pilot. Never imported by the released MCP entrypoint.
+import { nativeRootConversation, boundedNativeObservation } from './native-root-context.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import { readFileSync, realpathSync, openSync, closeSync, constants, lstatSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
 import { canonical, validateUuid } from '../vendor/psst/src/protocol.mjs';
 
+export const MAX_RETIRED_ROOTS = 256;
+const rootTransitionTools = new Set(['broker_setup_status','broker_connect']);
 const fail = () => { throw new Error('native_binding_rejected'); };
 const equal = (a,b) => canonical(a) === canonical(b);
 const digest = args => createHash('sha256').update(canonical(args)).digest('hex');
@@ -39,13 +42,15 @@ export function nativeHookContext(input, { expectedHost, parentPid = process.ppi
  * Cross-process private permit store: hook issues; MCP consumes atomically.
  * This is not authorization against hostile code executing as the same OS user.
  * Native host identity and hook input must come from nativeHookContext, never
- * MCP/model arguments. One conversation is supported; no implicit switching.
+ * MCP/model arguments. Strict mode selects a root only after verified transport
+ * provenance and owner-controlled drain; hook observations alone never select it.
  */
 export class NativeBinding {
-  constructor({ path, host, create = false, now = Date.now, failurePoint = () => {}, verifyHost = value => equal(processIdentity(value.pid),value), ownerEpoch } = {}) {
+  constructor({ path, host, create = false, now = Date.now, failurePoint = () => {}, verifyHost = value => equal(processIdentity(value.pid),value), ownerEpoch, strictRoot = false } = {}) {
     this.now = now; this.host = host; this.failurePoint = failurePoint; this.unusable = false;
     this.verifyHost=verifyHost;
     this.ownerEpoch=ownerEpoch;
+    this.strictRoot=strictRoot;
     this.abort = new AbortController(); this.signal = this.abort.signal;
     if (!isAbsolute(path) || realpathSync(dirname(path)) !== dirname(path)) fail();
     const parent = lstatSync(dirname(path));
@@ -61,10 +66,24 @@ export class NativeBinding {
         this.db.prepare('INSERT INTO binding VALUES(1,?,NULL,0,NULL)').run(canonical(host));
       }
       this.assertHost();
+      if(strictRoot){
+        this.db.exec('CREATE TABLE IF NOT EXISTS root_state(id INTEGER PRIMARY KEY CHECK(id=1),generation INTEGER NOT NULL,strict_admission_required INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS retired_roots(conversation TEXT PRIMARY KEY); CREATE TABLE IF NOT EXISTS root_observations(sequence INTEGER PRIMARY KEY AUTOINCREMENT,conversation TEXT UNIQUE NOT NULL,metadata TEXT NOT NULL);');
+        if(!this.db.prepare('PRAGMA table_info(root_state)').all().some(c=>c.name==='strict_admission_required')){
+          this.db.exec('BEGIN IMMEDIATE;');
+          try{this.db.exec('ALTER TABLE root_state ADD COLUMN strict_admission_required INTEGER NOT NULL DEFAULT 0; UPDATE root_state SET strict_admission_required=1 WHERE generation>0; COMMIT;');}
+          catch(error){try{this.db.exec('ROLLBACK');}catch{}throw error;}
+        }
+        this.db.exec('INSERT OR IGNORE INTO root_state(id,generation,strict_admission_required) VALUES(1,0,0);');
+      }
     } catch { this.db.close(); fail(); }
   }
   assertHost() {
     if(this.unusable)fail();
+    // Recheck every legacy operation, including handles opened before admission.
+    if(!this.strictRoot&&this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='root_state'").get()){
+      const state=this.db.prepare('SELECT * FROM root_state WHERE id=1').get();
+      if(state&&(state.strict_admission_required===1||state.generation>0))fail();
+    }
     const row=this.db.prepare('SELECT * FROM binding WHERE id=1').get();
     if (!row || row.host !== canonical(this.host) || row.closed || this.verifyHost(this.host)!==true
       || (this.ownerEpoch!==undefined && row.owner_epoch!==this.ownerEpoch)) fail();
@@ -78,7 +97,15 @@ export class NativeBinding {
   }
   observe(context) {
     return this.transaction(()=>{const row=this.assertHost();validateUuid(context?.conversationId);
-      if(!equal(context.host,this.host)||(row.conversation&&row.conversation!==context.conversationId))fail();
+      if(!equal(context.host,this.host)||(!this.strictRoot&&row.conversation&&row.conversation!==context.conversationId))fail();
+      if(this.strictRoot){
+        if(this.db.prepare('SELECT 1 FROM retired_roots WHERE conversation=?').get(context.conversationId))fail();
+        const metadata=boundedNativeObservation(context.metadata);
+        this.db.prepare('INSERT OR REPLACE INTO root_observations(conversation,metadata) VALUES(?,?)').run(context.conversationId,canonical(metadata));
+        const active=this.db.prepare('SELECT 1 FROM root_observations WHERE conversation=?').get(row.conversation);
+        this.db.prepare('DELETE FROM root_observations WHERE sequence IN (SELECT sequence FROM root_observations WHERE conversation IS NOT ? ORDER BY sequence DESC LIMIT -1 OFFSET ?)').run(row.conversation,active?31:32);
+        return context.conversationId;
+      }
       if(!row.conversation)this.db.prepare('UPDATE binding SET conversation=? WHERE id=1').run(context.conversationId);
       return context.conversationId;
     });
@@ -87,7 +114,10 @@ export class NativeBinding {
     return this.transaction(()=>{
       const row=this.assertHost();validateUuid(context?.conversationId);
       if (!equal(context.host,this.host) || !tools.has(tool) || !args || typeof args!=='object' || Array.isArray(args) || Object.hasOwn(args,'__psst_permit')) fail();
-      if (!row.conversation) {
+      if (this.strictRoot) {
+        if(this.db.prepare('SELECT 1 FROM retired_roots WHERE conversation=?').get(context.conversationId))fail();
+        if(['broker_wait','broker_wait_approval'].includes(tool)&&row.conversation!==context.conversationId)fail();
+      } else if (!row.conversation) {
         if (!['broker_connect','broker_setup','broker_setup_status'].includes(tool)) fail();
         this.db.prepare('UPDATE binding SET conversation=? WHERE id=1').run(context.conversationId);
       } else if(row.conversation!==context.conversationId) fail();
@@ -98,14 +128,68 @@ export class NativeBinding {
       return { ...args, __psst_permit: token };
     });
   }
-  consume({ tool, args }) {
+  consume({ tool, args, nativeMeta }) {
     return this.transaction(()=>{
       const row=this.assertHost(), {__psst_permit:token,...clean}=args??{};
+      if(this.strictRoot&&nativeRootConversation(nativeMeta)!==row.conversation)fail();
       validateUuid(token);
       const permit=this.db.prepare('SELECT * FROM permits WHERE token=?').get(token);
       if(!permit || permit.tool!==tool || permit.digest!==digest(clean) || permit.conversation!==row.conversation || permit.expires<=this.now())fail();
+      if(this.strictRoot)this.db.exec('UPDATE root_state SET strict_admission_required=1 WHERE id=1;');
       this.db.prepare('DELETE FROM permits WHERE token=?').run(token);
       return { conversationId: row.conversation, args: clean };
+    });
+  }
+
+
+  /** Native shell waiters carry only already-issued permits; they cannot select or switch roots. */
+  consumeWaiter({tool,args}) {
+    if(!this.strictRoot||!['broker_wait','broker_wait_approval'].includes(tool))fail();
+    return this.transaction(()=>{
+      const row=this.assertHost(),{__psst_permit:token,...clean}=args??{};validateUuid(token);
+      const permit=this.db.prepare('SELECT * FROM permits WHERE token=?').get(token);
+      if(!permit||permit.tool!==tool||permit.digest!==digest(clean)||permit.conversation!==row.conversation||permit.expires<=this.now())fail();
+      this.db.prepare('DELETE FROM permits WHERE token=?').run(token);
+      return {conversationId:row.conversation,args:clean};
+    });
+  }
+  rootObservation(conversationId) {
+    if(!this.strictRoot)fail();this.assertHost();validateUuid(conversationId);
+    const row=this.db.prepare('SELECT metadata FROM root_observations WHERE conversation=?').get(conversationId);
+    return row?{host:this.host,conversationId,metadata:boundedNativeObservation(JSON.parse(row.metadata))}:null;
+  }
+  /** Read-only admission check; owner must serialize transitions and drain old session before activateRoot. */
+  inspectRoot({tool,args,nativeMeta}) {
+    if(!this.strictRoot)fail();
+    return this.transaction(()=>{
+      const row=this.assertHost(),root=nativeRootConversation(nativeMeta),{__psst_permit:token,...clean}=args??{};
+      validateUuid(token);
+      const permit=this.db.prepare('SELECT * FROM permits WHERE token=?').get(token);
+      if(!permit||permit.tool!==tool||permit.digest!==digest(clean)||permit.conversation!==root||permit.expires<=this.now()
+        ||this.db.prepare('SELECT 1 FROM retired_roots WHERE conversation=?').get(root))fail();
+      if(row.conversation&&row.conversation!==root&&this.db.prepare('SELECT count(*) AS n FROM retired_roots').get().n>=MAX_RETIRED_ROOTS)fail();
+      const generation=this.db.prepare('SELECT generation FROM root_state WHERE id=1').get().generation;
+      return {conversationId:root,previousRoot:row.conversation,generation,ownerEpoch:row.owner_epoch,args:clean,observation:this.rootObservation(root)};
+    });
+  }
+  /** Atomic consume/select after owner drain. No implicit retry or rollback to a retired root. */
+  activateRoot({tool,args,nativeMeta,expectedRoot,expectedGeneration,expectedOwnerEpoch}) {
+    if(!this.strictRoot)fail();
+    return this.transaction(()=>{
+      const row=this.assertHost(),root=nativeRootConversation(nativeMeta),{__psst_permit:token,...clean}=args??{};
+      const state=this.db.prepare('SELECT generation FROM root_state WHERE id=1').get();
+      if(row.conversation!==expectedRoot||state.generation!==expectedGeneration||row.owner_epoch!==expectedOwnerEpoch)fail();
+      validateUuid(token);const permit=this.db.prepare('SELECT * FROM permits WHERE token=?').get(token);
+      if(!permit||permit.tool!==tool||permit.digest!==digest(clean)||permit.conversation!==root||permit.expires<=this.now()
+        ||this.db.prepare('SELECT 1 FROM retired_roots WHERE conversation=?').get(root))fail();
+      if(row.conversation!==root){
+        if(row.conversation&&(!rootTransitionTools.has(tool)||this.db.prepare('SELECT count(*) AS n FROM retired_roots').get().n>=MAX_RETIRED_ROOTS))fail();
+        if(row.conversation)this.db.prepare('INSERT INTO retired_roots VALUES(?)').run(row.conversation);
+        this.db.prepare('UPDATE binding SET conversation=? WHERE id=1').run(root);
+        this.db.exec('UPDATE root_state SET generation=generation+1 WHERE id=1; DELETE FROM permits;');
+      }else this.db.prepare('DELETE FROM permits WHERE token=?').run(token);
+      this.db.exec('UPDATE root_state SET strict_admission_required=1 WHERE id=1;');
+      return {conversationId:root,args:clean,generation:state.generation+(row.conversation!==root?1:0),observation:this.rootObservation(root)};
     });
   }
   invalidatePermits(){this.transaction(()=>{this.assertHost();this.db.exec('DELETE FROM permits');});}

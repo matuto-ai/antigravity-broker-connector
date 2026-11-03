@@ -107,16 +107,23 @@ messages are retained; broker presence can remain until lease expiry.
 
 The primary setup interface is a native skill asking for a single nonsecret URL
 and an MCP tool whose only setup field is `broker_url`; no private secret form is
-needed. SessionStart/PreInvocation hooks provide verified native context and can
-load approved state. PreToolUse permits remain one-use and exact-conversation,
+needed. SessionStart/PreInvocation hooks record verified native observations.
+Approved state loads only after a matching trusted root transport call. PreToolUse permits remain one-use and exact-conversation,
 and `allow` continues to delegate to ordinary native permissions.
 
-Only the first conversation in one CLI host is supported by the conservative
-root/subagent fence. Independent CLI hosts may share installation authorization;
-they do not share conversation identities. Switching to another conversation
-inside the same host is rejected rather than borrowing the first one's mailbox.
-No reliable CLI ConversationClosed/SessionEnd hook was established. Closing a
-host is observed, but deleting only its conversation is still a cleanup gate.
+A new root conversation is admitted only when trusted native MCP transport IDs
+identify that conversation as its own root and match its one-use hook permit.
+Child/subagent metadata cannot select a root. The owner serializes transitions,
+pauses and drains the old session without closing its broker session, then atomically
+selects the new root with a fresh independent mailbox. Existing credentials and old
+pending journals stay untouched; no messages or receipts are copied into the new
+root. Retired roots cannot reclaim the same host. Same-root MCP restart preserves
+its binding and journal; stale owner epochs and permits remain invalid.
+
+Hooks record bounded per-conversation model/project observations but cannot switch
+routing. No reliable ConversationClosed/SessionEnd event was established; deleting
+a conversation alone remains a cleanup acceptance gate. Real authenticated
+`/compact` continuity is not certified by the synthetic transport and HTTP tests.
 
 The background command waiter uses supported native completion notifications;
 it does not scrape terminals, simulate keys, force permission approval or run a
@@ -161,5 +168,56 @@ refreshes it without changing the identity or retry snapshot. Metadata never gra
 permissions and cannot switch the bound conversation.
 
 PreToolUse calls unrelated to Psst return `allow`, which delegates to the remaining
-hooks and normal native policy, not `auto_approve`. The first-conversation fence
-still applies: this correction does not migrate a mailbox after `/compact`.
+hooks and normal native policy, not `auto_approve`. Root selection separately requires verified native transport provenance; no
+permission decision authorizes mailbox migration after `/compact`.
+
+### Narrow root-transition admission
+
+The first verified root may use the existing identity-first startup flow. Once a
+root is active, a different verified root must first call `broker_setup_status`
+(or explicitly `broker_connect`) to select its independent mailbox. Identity,
+send, cancel, setup and other ordinary calls cannot retire or drain the active
+root. Hooks alone never select a root. Retired roots are never evicted or replayed:
+a binding accepts at most 256 retirements during one exact native-host lifetime,
+then refuses further transitions before draining; the active root still works.
+Restarting only MCP does not reset this bound. The pinned CLI 1.4.7 isolated
+qualification below now verifies actual `/compact` continuity and `/new` root
+rotation; authenticated user-environment wakeup acceptance remains separate.
+
+Creating a strict binding handle or observing native hooks does not by itself
+disable the legacy loader. Only a verified strict transport admission commits
+`strict_admission_required`; subsequent legacy operations, including already-open
+handles, then fail closed. Waiter consumption cannot activate this marker.
+
+
+## Isolated native qualification — 2026-11-03
+
+[Verify run 41557793494](https://github.com/matuto-ai/antigravity-broker-connector/actions/runs/41557793494)
+passed at `ee81b5b383fae84f9faf943ccbd8979cb61f2bc1`, including container
+persistence and the installable package. The pinned official CLI **1.4.7** ran
+with a fresh HOME, no external network, a synthetic loopback model provider and
+no user account or files. Optional collection stayed unchecked; only the exact
+disposable `/tmp/proof` workspace was trusted.
+
+Two separate suites establish different facts:
+
+- Native hook/transport metadata: actual root, child and lazy MCP calls; actual
+  interactive `/compact` and `/new`, with matching idle Stop events and clean
+  `/exit`. No synthetic root replacement was used for these observations.
+- Actual production connector plus an ephemeral TLS Psst: only
+  `broker_setup_status` and `broker_identity`, through native `call_mcp_tool`.
+  Responses are strictly correlated to the requested tool and decoded from the
+  observed native hook-notice envelope. `/compact` preserves the conversation,
+  client, journal and generation in this pinned CLI. `/new` changes conversation,
+  client and journal and increments generation once, retaining the same host and
+  MCP owner. Read-only database assertions supplement—not replace—tool responses.
+
+Reproduce with `bash scripts/native-contract-proof/run.sh` and
+`bash scripts/native-contract-proof/run-actual.sh`; the latter requires the
+workflow's exact disposable Psst checkout. Recorded sanitized observations are
+in `scripts/native-contract-proof/recorded-native-acceptance.json`.
+
+This is **not** proof of authenticated vendor-model behavior, the user's installed
+version, or unattended message wakeup. Actual send/receive/ACK, idle/busy wakeup,
+permission rejection, disconnect/restart and conversation-only cleanup remain
+separate live acceptance gates. No release or 1.0 readiness is implied.

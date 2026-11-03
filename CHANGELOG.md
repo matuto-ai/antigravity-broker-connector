@@ -1,5 +1,8 @@
 # 0.6.0 — Unreleased
 
+- Admit verified native root transitions only through setup-status/connect after the first root, with a fail-closed 256-retirement bound, transport root/self IDs and exact hook permits; drain old work and preserve old journals without replay into the new mailbox. Child IDs and retired roots cannot select the owner.
+- Preserve same-root retention recovery, explicit setup recovery and native permissions. Authenticated `/compact` acceptance remains separate from local fixtures.
+
 - Rename the npm distribution and GitHub repository to `antigravity-psst-connector`.
 - Preserve native plugin identity, commands, private installation state and message journals.
 - Existing installations require an explicit package/source update; see `docs/migration-0.6.0.md`.

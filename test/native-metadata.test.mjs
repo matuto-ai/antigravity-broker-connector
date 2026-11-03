@@ -46,14 +46,13 @@ test('native connection registration and send observer read only the bound priva
  const server=await serveNativePlugin({base:root,host,input:new PassThrough(),output:new PassThrough(),configReader:()=>config,
   sessionFactory:async options=>{captured=options;return {identity:{client_id:randomUUID()},inbox:{directory:root},tools:{},close:async()=>{}};}});
  t.after(()=>server.close());
- const eventFile=join(server.directory,'native-event.json');
- const save=(model,id=conversationId)=>writeFileSync(eventFile,JSON.stringify({host,conversationId:id,metadata:{model:{provider:null,id:model,source:'observed'},project:'project'}}),{mode:0o600});
+ const save=(model,id=conversationId)=>server.binding.observe({host,conversationId:id,metadata:{model:{provider:null,id:model,source:'observed'},project:'project'}});
  save('first-model');
- await server.tools.broker_connect(server.binding.issue({context,tool:'broker_connect',args:{connection_file:'/synthetic/config'}}));
+ await server.tools.broker_connect(server.binding.issue({context,tool:'broker_connect',args:{connection_file:'/synthetic/config'}}),{nativeMeta:{'antigravity.google/conversation_id':conversationId,'antigravity.google/root_conversation_id':conversationId}});
  assert.equal(captured.config.metadata.model.id,'first-model');
  assert.equal(captured.config.metadata.project,'project');
  save('next-model');assert.equal(captured.observeMetadata().model.id,'next-model');
- save('foreign-model',randomUUID());assert.equal(captured.observeMetadata().model.source,'unknown');
+ save('foreign-model',randomUUID());assert.equal(captured.observeMetadata().model.id,'next-model');
  assert.equal(config.metadata.model.source,'unknown');
 });
 
@@ -78,13 +77,15 @@ test('real native HTTP registration and send publish observed metadata without c
  assert.equal((await self()).model.id,'next-model');assert.equal(session.identity.client_id,id);
 });
 
-test('real hook subprocess records bounded observations only for its first verified native conversation',async t=>{
+test('real hook subprocess records bounded observations per verified native conversation without selecting a root',async t=>{
  const {execFileSync}=await import('node:child_process');
  const {readFileSync}=await import('node:fs');
  const {processIdentity}=await import('../src/native-binding.mjs');
- const {ownerDirectory}=await import('../src/native-plugin.mjs');
+ const {serveNativePlugin}=await import('../src/native-plugin.mjs');
+ const {PassThrough}=await import('node:stream');
  const root=mkdtempSync(join(tmpdir(),'agy-native-observation-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
- const conversationId=randomUUID(),host=processIdentity(process.pid),file=join(ownerDirectory(root,host),'native-event.json');
+ const conversationId=randomUUID(),host=processIdentity(process.pid);
+ const server=await serveNativePlugin({base:root,host,input:new PassThrough(),output:new PassThrough()});t.after(()=>server.close());
  const moduleUrl=new URL('../src/native-plugin.mjs',import.meta.url).href;
  const quote=value=>`'${value.replaceAll("'", "'\\''")}'`;
  const observe=(id,model)=>{
@@ -92,8 +93,8 @@ test('real hook subprocess records bounded observations only for its first verif
   const code=`import {handleNativeHook} from ${JSON.stringify(moduleUrl)}; process.stdout.write(JSON.stringify(handleNativeHook(${JSON.stringify(input)},{base:${JSON.stringify(root)},observe:true})));`;
   return JSON.parse(execFileSync('/bin/sh',['-c',`${quote(process.execPath)} --input-type=module -e ${quote(code)}; result=$?; exit "$result"`],{env:{...process.env,ANTIGRAVITY_CONVERSATION_ID:id},encoding:'utf8',timeout:5000}));
  };
- observe(conversationId,'first');assert.equal(JSON.parse(readFileSync(file,'utf8')).metadata.model.id,'first');
- observe(conversationId,'second');assert.equal(JSON.parse(readFileSync(file,'utf8')).metadata.model.id,'second');
- assert.deepEqual(observe(randomUUID(),'foreign'),{});
- const stored=JSON.parse(readFileSync(file,'utf8'));assert.equal(stored.conversationId,conversationId);assert.equal(stored.metadata.model.id,'second');assert.equal(stored.metadata.project,'project');
+ observe(conversationId,'first');assert.equal(server.binding.rootObservation(conversationId).metadata.model.id,'first');
+ observe(conversationId,'second');assert.equal(server.binding.rootObservation(conversationId).metadata.model.id,'second');
+ const child=randomUUID();observe(child,'foreign');assert.equal(server.binding.rootObservation(child).metadata.model.id,'foreign');assert.equal(server.binding.assertHost().conversation,null);
+ const stored=server.binding.rootObservation(conversationId);assert.equal(stored.conversationId,conversationId);assert.equal(stored.metadata.model.id,'second');assert.equal(stored.metadata.project,'project');
 });

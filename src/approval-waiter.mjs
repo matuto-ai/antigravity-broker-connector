@@ -7,10 +7,10 @@ import { readPrivate } from './installation.mjs';
 /** Body-free native background completion, never a model polling loop or ACK. */
 export async function waitApproval({directory,permit,signal}){
  const owner=readPrivate(join(directory,'owner.json'));
- const binding=new NativeBinding({path:join(directory,'binding.sqlite'),host:owner.host,ownerEpoch:owner.ownerEpoch});
+ const binding=new NativeBinding({path:join(directory,'binding.sqlite'),host:owner.host,ownerEpoch:owner.ownerEpoch,strictRoot:true});
  let lock;
  try{
-  const {conversationId}=binding.consume({tool:'broker_wait_approval',args:{__psst_permit:permit}});
+  const {conversationId}=binding.consumeWaiter({tool:'broker_wait_approval',args:{__psst_permit:permit}});
   const initial=readPrivate(join(directory,'approval.json'));
   const lockPath=join(directory,'approval-waiter-owner.sqlite'),fd=openSync(lockPath,constants.O_CREAT|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);
   try{const s=fstatSync(fd);if(!s.isFile()||(s.mode&0o077)||(process.getuid&&s.uid!==process.getuid()))throw Error('native_waiter_unavailable');}finally{closeSync(fd);}

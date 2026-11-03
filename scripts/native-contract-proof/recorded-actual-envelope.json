@@ -1,0 +1,11 @@
+{
+  "provenance": {
+    "run": "41557405226",
+    "native_cli_version": "1.4.7",
+    "synthetic_dates": true,
+    "note": "Envelope format observed in network-isolated native CI; dates and body substituted with synthetic fixture values. Official pinned binary layout: 2006-01-02T15:04:05Z."
+  },
+  "response": {
+    "output": "Created At: 2026-11-03T00:56:00Z\nCompleted At: 2026-11-03T00:56:01Z\nA pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.\n\n{\"connected\":true,\"mode\":\"automatic_required\"}"
+  }
+}
