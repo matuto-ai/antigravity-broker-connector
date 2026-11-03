@@ -8,10 +8,10 @@ import { PENDING_NOTICE } from './native-waiter.mjs';
 /** Finite native background task; local safety checks never invoke a model. */
 export async function waitNativeProcess({directory,permit,signal}) {
   const owner=readPrivateJson(join(directory,'owner.json'));
-  const binding=new NativeBinding({path:join(directory,'binding.sqlite'),host:owner.host,ownerEpoch:owner.ownerEpoch});
+  const binding=new NativeBinding({path:join(directory,'binding.sqlite'),host:owner.host,ownerEpoch:owner.ownerEpoch,strictRoot:true});
   let lock,db,watcher,timer,onAbort;
   try {
-    const {conversationId}=binding.consume({tool:'broker_wait',args:{__psst_permit:permit}});
+    const {conversationId}=binding.consumeWaiter({tool:'broker_wait',args:{__psst_permit:permit}});
     const initial=readPrivateJson(join(directory,'session.json'));
     if(!initial.connected||initial.conversationId!==conversationId)throw Error('native_not_connected');
     const lockPath=join(directory,'waiter-owner.sqlite');

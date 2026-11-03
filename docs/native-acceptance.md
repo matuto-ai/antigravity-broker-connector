@@ -47,11 +47,13 @@ native host and restart with the installation directory retained. Verify no
 human-permission inference from message text and no duplicate model processing.
 Stop on a native denial; do not alter authorization to force this test through.
 
-The first-conversation-per-CLI-host fence is deliberate: concurrent independent
-hosts work; switching conversations inside one host is not certified. A documented
-conversation-only close event has not been established, so host exit/disconnect
-is the verified cleanup boundary. Do not advertise all native acceptance gates
-as complete until those observations are recorded.
+Trusted root/self MCP transport IDs now permit serialized new-root transitions
+within a host. Each new root receives a fresh mailbox; old journals and installation
+authorization remain intact. Child calls, stale permits and retired roots cannot
+select an owner. Local tests cover real HTTP pending-message retention and synthetic
+native transport context, not authenticated `/compact` or idle-wakeup acceptance.
+A documented conversation-only close event remains unestablished. Do not advertise
+all native acceptance gates as complete until those observations are recorded.
 
 The native task arguments are taken from the installed host's schema. The plugin
 asks only for `CommandLine` and `WaitMsBeforeAsync=500`; it does not invent an
@@ -67,3 +69,15 @@ Earlier missing-path/parser/owner-lock failures remain installation usability
 findings; the later same-path success means a universal `@` parser limitation
 must not be inferred. The read-only installation doctor now checks the actual
 root and gives the in-session slash command without source copying or policy changes.
+
+### Narrow root-transition admission
+
+The first verified root may use the existing identity-first startup flow. Once a
+root is active, a different verified root must first call `broker_setup_status`
+(or explicitly `broker_connect`) to select its independent mailbox. Identity,
+send, cancel, setup and other ordinary calls cannot retire or drain the active
+root. Hooks alone never select a root. Retired roots are never evicted or replayed:
+a binding accepts at most 256 retirements during one exact native-host lifetime,
+then refuses further transitions before draining; the active root still works.
+Restarting only MCP does not reset this bound. No actual native `/compact`
+acceptance is implied by these offline changes.

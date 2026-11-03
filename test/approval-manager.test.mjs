@@ -51,3 +51,49 @@ test('old cleanup failure after selected candidate cannot close new or overwrite
 test('known expired pending request stops locally without GET, POST or implicit replacement',async t=>{
  const f=fixture(t),requestId=randomUUID();f.installation.beginPending({brokerUrl:'https://broker.example',requestId,previousRevision:null});const m=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>({state:'pending',requestId,requestExpiresAt:'2000-01-01T00:00:00Z'}),pollApproval:()=>{throw Error('expired should not poll');}},activate:{}});await m.resume();await m.done;assert.equal(m.status.state,'expired');
 });
+
+const barrier=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve};};
+test('close during initial begin read prevents POST, intent writes and late status',async t=>{
+ const f=fixture(t),read=barrier(),entered=barrier(),publications=[];let posts=0,writes=0;
+ const beginPending=f.installation.beginPending;f.installation.beginPending=(...args)=>{writes++;return beginPending(...args);};
+ const m=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>{entered.resolve();return read.promise;},beginApproval:()=>{posts++;throw Error('must not POST');}},activate:{},onStatus:s=>publications.push(s)});
+ const pending=m.begin('https://broker.example');await entered.promise;m.close();read.resolve(null);await pending;
+ assert.equal(posts,0);assert.equal(writes,0);assert.equal(f.installation.pending(),null);assert.equal(f.installation.selected(),null);assert.deepEqual(publications,[]);
+ await assert.rejects(m.begin('https://broker.example'),/approval_manager_closed/);await assert.rejects(m.resume(),/approval_manager_closed/);
+ m.attention();m.adopt({requestId:'ignored'});m.cancel();m.close();assert.deepEqual(publications,[]);
+});
+test('close during begin POST retains recoverable intent and new manager resumes same request GET-only',async t=>{
+ const f=fixture(t),r=approved(f),post=barrier(),entered=barrier();let posts=0,polls=0;const publications=[];
+ const m=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>null,beginApproval:()=>{posts++;entered.resolve();return post.promise;}},activate:{},onStatus:s=>publications.push(s)});
+ const pending=m.begin('https://broker.example');await entered.promise;assert.equal(f.installation.pending().requestId,null);m.close();post.resolve(r);await pending;
+ assert.equal(f.installation.pending().cancelled,false);assert.equal(f.installation.selected(),null);assert.deepEqual(publications,[]);
+ const n=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>({state:'pending',requestId:r.requestId}),beginApproval:()=>{posts++;throw Error('no replacement POST');},pollApproval:()=>{polls++;return r;}},activate:{prepare:async()=>({close:async()=>{}}),commit:async()=>{}}});
+ await n.resume();await n.done;assert.equal(posts,1);assert.equal(polls,1);assert.equal(f.installation.selected().requestId,r.requestId);n.close();
+});
+test('close during resume read prevents publication, recovered writes and polling',async t=>{
+ const f=fixture(t),read=barrier(),entered=barrier(),r=approved(f),publications=[];let polls=0;
+ f.installation.beginPending({brokerUrl:'https://broker.example',requestId:null,previousRevision:null});
+ const before=f.installation.pending();
+ const m=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>{entered.resolve();return read.promise;},pollApproval:()=>{polls++;return r;}},activate:{},onStatus:s=>publications.push(s)});
+ const pending=m.resume();await entered.promise;m.close();read.resolve({state:'pending',requestId:r.requestId});await pending;await m.done;
+ assert.equal(polls,0);assert.deepEqual(publications,[]);assert.deepEqual(f.installation.pending(),before);assert.equal(f.installation.selected(),null);
+});
+test('close during preparation drains candidate without attaching or cancelling durable request',async t=>{
+ const f=fixture(t),r=approved(f),prepared=barrier(),entered=barrier();let commits=0,closed=0;
+ const m=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>null,beginApproval:()=>r},activate:{prepare:async()=>{entered.resolve();await prepared.promise;return{close:async()=>closed++};},commit:async()=>{commits++;}}});
+ await m.begin('https://broker.example');await entered.promise;m.close();prepared.resolve();await m.done;
+ assert.equal(commits,0);assert.equal(closed,1);assert.equal(f.installation.selected(),null);assert.equal(f.installation.pending().requestId,r.requestId);assert.equal(f.installation.pending().cancelled,false);
+});
+test('close during staged commit rolls back before selection and suppresses late publication',async t=>{
+ const f=fixture(t),r=approved(f),staged=barrier(),entered=barrier(),publications=[];let rollback=0,closed=0;
+ const m=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>null,beginApproval:()=>r},activate:{prepare:async()=>({close:async()=>closed++}),commit:async()=>{entered.resolve();await staged.promise;return{rollback:async()=>rollback++};}},onStatus:s=>publications.push(s)});
+ await m.begin('https://broker.example');await entered.promise;const count=publications.length;m.close();staged.resolve();await m.done;
+ assert.equal(rollback,1);assert.equal(closed,1);assert.equal(f.installation.selected(),null);assert.equal(publications.length,count);assert.equal(f.installation.pending().cancelled,false);
+});
+test('close joins superseded approval preparation as well as replacement loop',async t=>{
+ const f=fixture(t),r=approved(f),prepare=barrier(),entered=barrier(),latest=barrier();let polls=0,closed=0,commits=0;
+ f.installation.beginPending({brokerUrl:'https://broker.example',requestId:r.requestId,previousRevision:null});
+ const m=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>({state:'pending',requestId:r.requestId}),pollApproval:()=>++polls===1?r:latest.promise},activate:{prepare:async()=>{entered.resolve();await prepare.promise;return{close:async()=>closed++};},commit:async()=>commits++}});
+ await m.resume();await entered.promise;await m.resume();assert.equal(polls,2);m.close();let drained=false;const done=m.done.then(()=>{drained=true;});latest.resolve(r);await new Promise(r=>setImmediate(r));assert.equal(drained,false);
+ prepare.resolve();await done;assert.equal(closed,1);assert.equal(commits,0);assert.equal(f.installation.selected(),null);
+});

@@ -15,7 +15,7 @@ tar -xzf "$tmp/cli.tgz" -C "$tmp" antigravity
 chmod 755 "$tmp" "$tmp/antigravity"
 fixture="$tmp/fixture"
 mkdir -p "$fixture/xterm-pinned"
-for file in worker.mjs consent-state-navigation.mjs consent-navigation.test.mjs recorded-consent-screens.json recorded-navigation-screens.json xterm-screen.mjs consent-state.mjs xterm-screen.test.mjs consent-state.test.mjs recorded-terminal.json xterm-integrity.json; do cp "$root/$file" "$fixture/$file"; done
+for file in worker.mjs trust-state.mjs trust-state.test.mjs recorded-trust-screen.json consent-state-navigation.mjs consent-navigation.test.mjs recorded-consent-screens.json recorded-navigation-screens.json xterm-screen.mjs consent-state.mjs xterm-screen.test.mjs consent-state.test.mjs recorded-terminal.json xterm-integrity.json; do cp "$root/$file" "$fixture/$file"; done
 curl --fail --location --max-time 120 https://registry.npmjs.org/@xterm/headless/-/headless-6.0.0.tgz -o "$tmp/xterm.tgz"
 node --input-type=module - "$tmp/xterm.tgz" <<'NODE'
 import {readFileSync} from 'node:fs';import {createHash} from 'node:crypto';
@@ -23,10 +23,10 @@ if(createHash('sha512').update(readFileSync(process.argv[2])).digest('base64')!=
 NODE
 tar -xzf "$tmp/xterm.tgz" -C "$fixture/xterm-pinned"
 chmod -R a+rX "$fixture"
-node --test "$fixture/xterm-screen.test.mjs" "$fixture/consent-state.test.mjs" "$fixture/consent-navigation.test.mjs"
+node --test "$fixture/xterm-screen.test.mjs" "$fixture/consent-state.test.mjs" "$fixture/consent-navigation.test.mjs" "$fixture/trust-state.test.mjs"
 status=0
 for mode in root child lazy compact; do
-timeout --kill-after=5s 50s docker run --rm --name "$name" --network none --user 1000:1000 --read-only --memory 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m --mount "type=bind,src=$tmp/antigravity,dst=/native/antigravity,readonly" --mount "type=bind,src=$fixture/worker.mjs,dst=/fixture/worker.mjs,readonly" --mount "type=bind,src=$fixture/xterm-screen.mjs,dst=/fixture/xterm-screen.mjs,readonly" --mount "type=bind,src=$fixture/consent-state-navigation.mjs,dst=/fixture/consent-state-navigation.mjs,readonly" --mount "type=bind,src=$fixture/xterm-pinned/package,dst=/fixture/xterm-pinned/package,readonly" -e HOME=/tmp/proof-home "$image" node /fixture/worker.mjs "$mode" || status=1
+timeout --kill-after=5s 50s docker run --rm --name "$name" --network none --user 1000:1000 --read-only --memory 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m --mount "type=bind,src=$tmp/antigravity,dst=/native/antigravity,readonly" --mount "type=bind,src=$fixture/worker.mjs,dst=/fixture/worker.mjs,readonly" --mount "type=bind,src=$fixture/trust-state.mjs,dst=/fixture/trust-state.mjs,readonly" --mount "type=bind,src=$fixture/xterm-screen.mjs,dst=/fixture/xterm-screen.mjs,readonly" --mount "type=bind,src=$fixture/consent-state-navigation.mjs,dst=/fixture/consent-state-navigation.mjs,readonly" --mount "type=bind,src=$fixture/xterm-pinned/package,dst=/fixture/xterm-pinned/package,readonly" -e HOME=/tmp/proof-home "$image" node /fixture/worker.mjs "$mode" || status=1
 docker rm -f "$name" >/dev/null 2>&1 || true
 done
 exit "$status"

@@ -77,7 +77,7 @@ successful notice does not advance the FIFO, create a read receipt, or prove
 the requested action succeeded. No terminal input injection, permission override,
 infinite Stop-hook continuation, or model-polling cron is an acceptable substitute.
 
-`src/native-binding.mjs` is the second gated primitive: a first-conversation fence
+`src/native-binding.mjs` is the second gated primitive: a root-provenance and retired-conversation fence
 and small private SQLite invocation-permit store. A verified hook issues an
 opaque, one-use, 30-second permit for exact tool arguments; MCP must consume it
 atomically before acting. At most 32 unexpired permits are retained, containing
@@ -123,16 +123,15 @@ retries. Two notices per head are allowed, followed by one attention notice;
 subsequent waits for the same unacknowledged head stay silent. This budget is
 persisted and never consumes the message.
 
-Only the first explicitly connected conversation in a native CLI process is
-supported. A different conversation requires a fresh CLI host. One kernel-held
-MCP-owner lock prevents concurrent owners. MCP EOF invalidates its permits and
-waiter but preserves the verified native host's first-conversation fence. A
-restart under the same host starts disconnected; a new explicit connect creates
-a fresh mailbox, never silently adopts the old one. Owner-incarnation checks
-reject old hooks and permits. Disconnect cancels the waiter and transport, while retaining the
-private installation credential; a new connect creates a fresh session address.
-Re-pairing creates a separate private credential directory. Expiry or terminal
-broker authentication failure stops transport and marks the connection unavailable.
+The current candidate admits a new root only through matching trusted native MCP
+root/self IDs and a one-use hook permit. A kernel-held owner lock and serialized
+drain prevent concurrent publication. Old transports pause without broker session
+closure; old pending journals remain isolated rather than being migrated. New
+roots receive independent addresses. Same-root MCP restart retains its journal,
+while stale permits, owner epochs, child IDs and retired roots are rejected.
+This supersedes the historical first-conversation-only pilot limitation. It does
+not establish authenticated `/compact` acceptance or permission bypass. Shared
+installation authorization remains separate from each root mailbox.
 There is no documented CLI ConversationClosed/SessionEnd hook. `Stop`/`fullyIdle`
 is not treated as session closure because it also describes normal idle work.
 Immediate deregistration when a conversation alone is deleted while its host
@@ -202,3 +201,15 @@ are never transferred or automatically replayed under the new identity. Storage
 uncertainty stops replacement until deliberate restart/reconciliation. A target
 message404, authorization error or different native conversation is not authority
 to replace a session. Local archived journals are not removed by server retention.
+
+### Narrow root-transition admission
+
+The first verified root may use the existing identity-first startup flow. Once a
+root is active, a different verified root must first call `broker_setup_status`
+(or explicitly `broker_connect`) to select its independent mailbox. Identity,
+send, cancel, setup and other ordinary calls cannot retire or drain the active
+root. Hooks alone never select a root. Retired roots are never evicted or replayed:
+a binding accepts at most 256 retirements during one exact native-host lifetime,
+then refuses further transitions before draining; the active root still works.
+Restarting only MCP does not reset this bound. No actual native `/compact`
+acceptance is implied by these offline changes.

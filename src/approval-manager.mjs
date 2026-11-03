@@ -3,11 +3,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 const origin=value=>{let u;try{u=new URL(value);}catch{throw Error('https_broker_url_required');}if(typeof value!=='string'||u.protocol!=='https:'||u.username||u.password||u.search||u.hash||u.pathname!=='/'||/[\s\u0000-\u001f]/u.test(value))throw Error('https_broker_url_required');return u.origin;};
 export function createApprovalManager({installation,api,activate,isAlive=()=>true,onStatus=()=>{},pollMs=2000,sleep=delay}){
  if(pollMs<2000)throw Error('approval_poll_too_fast');
- let generation=0,controller,busy=false,status={state:'setup_needed'},task;
+ let generation=0,controller,busy=false,closed=false,status={state:'setup_needed'};
+ const tasks=new Set();
+ const alive=()=>!closed&&isAlive();
  const publicState=result=>({state:result.state,requestId:result.requestId??null,...(result.requestExpiresAt?{requestExpiresAt:result.requestExpiresAt}:{})});
- const publish=result=>{status=publicState(result);onStatus(status);return status;};
+ const publish=result=>{if(!alive())return status;status=publicState(result);onStatus(status);return status;};
  const options=p=>({brokerUrl:p.brokerUrl,directory:installation.directory,clientType:'antigravity-cli'});
- const current=(epoch,p)=>{const pending=installation.pending(),selected=installation.selected();return generation===epoch&&!controller.signal.aborted&&isAlive()&&pending?.requestId===p.requestId&&(pending.cancelled===false||selected?.requestId===p.requestId);};
+ const current=(epoch,p)=>{if(!alive()||generation!==epoch||controller?.signal.aborted)return false;const pending=installation.pending(),selected=installation.selected();return generation===epoch&&!controller.signal.aborted&&alive()&&pending?.requestId===p.requestId&&(pending.cancelled===false||selected?.requestId===p.requestId);};
  async function apply(result,p,epoch){
   if(!current(epoch,p))return;
   if(result.requestId!==p.requestId)throw Error('approval_request_mismatch');
@@ -30,39 +32,44 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
     expiresAt=result.requestExpiresAt??expiresAt;await apply(result,p,epoch);if(result.state!=='pending')return;
     failures=0;await sleep(pollMs,undefined,{signal:controller.signal});result=null;
    }catch(error){
-    if(generation!==epoch||controller.signal.aborted)return;
+    if(!alive()||generation!==epoch||controller.signal.aborted)return;
     if(!error.retryable){publish({state:'attention_required',requestId:p.requestId});return;}
     publish({state:'pending',requestId:p.requestId,requestExpiresAt:expiresAt});result=null;
     try{await sleep(Math.max(Math.min(300000,Math.max(1000,Number.isFinite(error.retryAfterMs)?error.retryAfterMs:0)),Math.min(30000,pollMs*2**Math.min(++failures,4))),undefined,{signal:controller.signal});}catch{return;}
    }
   }
  }
- function launch(p,result,pendingDeadline){controller?.abort();controller=new AbortController();const epoch=++generation;task=loop(p,epoch,result,pendingDeadline);return status;}
- return {get status(){return status;},get done(){return task??Promise.resolve();},
+ function launch(p,result,pendingDeadline){if(!alive())return status;controller?.abort();controller=new AbortController();const epoch=++generation;const task=loop(p,epoch,result,pendingDeadline);tasks.add(task);task.then(()=>tasks.delete(task),()=>tasks.delete(task));return status;}
+ return {get status(){return status;},get done(){return Promise.allSettled([...tasks]);},
   async begin(brokerUrl){
+   if(!alive())throw Error('approval_manager_closed');
+   const startedGeneration=generation;
    if(busy)throw Error('setup_in_progress');busy=true;
    try{
     brokerUrl=origin(brokerUrl);const old=installation.selected(),prior=installation.pending();
     const existing=await api.readApprovalState({brokerUrl,directory:installation.directory,clientType:'antigravity-cli'});
+    if(!alive()||generation!==startedGeneration)return status;
     const replacing=existing&&existing.state!=='pending';
     if(prior&&!prior.cancelled&&prior.brokerUrl!==brokerUrl)throw Error('cancel_pending_setup_first');
     const p=installation.beginPending({brokerUrl,previousRevision:old?.revision??null});
     controller?.abort();controller=new AbortController();const epoch=++generation;
     const result=await api.beginApproval({...options(p),...(replacing?{replaceRequestId:existing.requestId}:{})});
-    if(epoch!==generation||!isAlive()||installation.pending()?.cancelled)return status;
+    if(epoch!==generation||!alive()||installation.pending()?.cancelled)return status;
     const saved=installation.beginPending({...p,requestId:result.requestId});publish(result.state==='approved'?{...result,state:'pending'}:result);launch(saved,result);return status;
    }finally{busy=false;}
   },
   async resume(){
+   if(!alive())throw Error('approval_manager_closed');
+   const startedGeneration=generation;
    const p=installation.pending();if(!p||p.cancelled)return status;
-   const saved=await api.readApprovalState(options(p));if(!saved)return publish({state:'setup_needed',requestId:p.requestId});
+   const saved=await api.readApprovalState(options(p));if(!alive()||generation!==startedGeneration)return status;if(!saved)return publish({state:'setup_needed',requestId:p.requestId});
    if(p.requestId!==null&&p.requestId!==saved.requestId)throw Error('approval_request_mismatch');
    const recovered=p.requestId===null?installation.beginPending({...p,requestId:saved.requestId}):p;
    publish(saved.state==='approved'?{...saved,state:'pending'}:saved);launch(recovered,null,saved.state==='pending'?saved.requestExpiresAt:undefined);return status; // GET only, never beginApproval.
   },
   attention(){return publish({state:'attention_required',requestId:status.requestId});},
   adopt(selected){return publish({state:'approved',requestId:selected.requestId});},
-  cancel(){generation++;controller?.abort();return publish({state:'cancelled',requestId:status.requestId});},
-  close(){generation++;controller?.abort();},
+  cancel(){if(closed)return status;generation++;controller?.abort();return publish({state:'cancelled',requestId:status.requestId});},
+  close(){if(closed)return;closed=true;generation++;controller?.abort();},
  };
 }

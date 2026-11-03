@@ -1,7 +1,7 @@
 // Adapted from the pinned Psst MCP transport. Extension: cooperative receipt and identity tools.
 import { StringDecoder } from 'node:string_decoder';
 import { readableReceive } from './receive-presentation.mjs';
-import { canonical } from '../vendor/psst/src/protocol.mjs';
+import { canonical, validateUuid } from '../vendor/psst/src/protocol.mjs';
 import { invokeTool } from '../vendor/psst/reference/tools.mjs';
 
 /** Minimal MCP 2025-06-18 stdio tools only; not HTTP MCP, channels, or a TUI wakeup API. */
@@ -27,6 +27,21 @@ export const TOOL_DEFINITIONS = Object.freeze([
 ]);
 
 function isObject(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+// Transport provenance is descriptive input to the owner's binding checks, not authority
+// by itself. Opt-in only: no tool argument can supply or override these fields.
+function boundedNativeTransportMetadata(value) {
+  if (value === undefined) return null;
+  if (!isObject(value)) throw Error('invalid_native_transport_metadata');
+  const result = {};
+  for (const key of ['antigravity.google/conversation_id', 'antigravity.google/root_conversation_id']) {
+    if (!Object.hasOwn(value, key)) throw Error('invalid_native_transport_metadata');
+    result[key] = validateUuid(value[key]);
+  }
+  const parent = 'antigravity.google/parent_conversation_id';
+  if (Object.hasOwn(value, parent)) result[parent] = validateUuid(value[parent]);
+  return Object.freeze(result);
+}
+
 function validArguments(value, schema) {
   if (!isObject(value)) return false;
   if (Object.keys(value).some(key => !Object.hasOwn(schema.properties, key))) return false;
@@ -54,8 +69,8 @@ function validArguments(value, schema) {
  */
 export function serveStdio({ input = process.stdin, output = process.stdout, tools, onClose = async () => {},
   onDiagnostic = () => {}, maxFrameBytes = 128 * 1024, maxResponseBytes = 512 * 1024, readableNativeReceive = false, maxReceiveResponseBytes = maxResponseBytes, maxInflight = 8,
-  definitions = TOOL_DEFINITIONS, instructions } = {}) {
-  if (!tools || !input?.on || !output?.write || !Number.isSafeInteger(maxFrameBytes) || maxFrameBytes < 1024 || maxFrameBytes > 1024 * 1024
+  definitions = TOOL_DEFINITIONS, instructions, nativeTransportMetadata = false } = {}) {
+  if (typeof nativeTransportMetadata !== 'boolean' || !tools || !input?.on || !output?.write || !Number.isSafeInteger(maxFrameBytes) || maxFrameBytes < 1024 || maxFrameBytes > 1024 * 1024
     || !Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1024 || maxResponseBytes > 1024 * 1024
     || typeof readableNativeReceive !== 'boolean' || !Number.isSafeInteger(maxReceiveResponseBytes) || maxReceiveResponseBytes < 1024 || maxReceiveResponseBytes > 1024 * 1024
     || !Number.isSafeInteger(maxInflight) || maxInflight < 1 || maxInflight > 32) throw new Error('invalid_stdio_configuration');
@@ -72,7 +87,7 @@ export function serveStdio({ input = process.stdin, output = process.stdout, too
     try { await onClose(); } catch { diagnostic('stdio_close_failed'); }
     closeResolve(); return done;
   };
-  function send(message, limit = maxResponseBytes) {
+  function send(message, limit = maxResponseBytes, guard) {
     if (closed) return;
     if (pendingWrites >= maxInflight) { void close('stdio_output_backpressure'); return; }
     let line;
@@ -81,45 +96,63 @@ export function serveStdio({ input = process.stdin, output = process.stdout, too
       line = JSON.stringify({ jsonrpc: '2.0', id: message.id ?? null, error: { code: -32603, message: 'Response exceeds the configured byte limit; no native acceptance was recorded.' } }) + '\n';
     }
     pendingWrites++;
-    writes = writes.then(() => new Promise(resolve => {
+    const ownWrite = writes.then(() => new Promise(resolve => {
       if (closed) return resolve();
+      // Last synchronous fence: no await between ownership check and write.
+      if (guard) {
+        let current = false; try { current = guard() === true; } catch {}
+        if (!current) line = JSON.stringify({ jsonrpc: '2.0', id: message.id ?? null, error: { code: -32603, message: 'Native root changed; reconcile the original operation. Prior outcome is not replayed.' } }) + '\n';
+      }
       try { output.write(line, error => { if (error) void close('stdio_write_failed'); resolve(); }); }
       catch { void close('stdio_write_failed'); resolve(); }
     })).finally(() => { pendingWrites--; });
+    writes = ownWrite; return ownWrite;
   }
   const error = (id, code, message) => send({ jsonrpc: '2.0', id, error: { code, message } });
 
-  async function dispatch(request) {
+  async function dispatch(request, responseState) {
+    const sendResponse = (message, limit) => send(message, limit, responseState.guard);
+    const errorResponse = (id, code, message) => sendResponse({ jsonrpc: '2.0', id, error: { code, message } });
     const id = request.id;
-    if (request.method === 'ping') { send({ jsonrpc: '2.0', id, result: {} }); return; }
+    if (request.method === 'ping') { return sendResponse({ jsonrpc: '2.0', id, result: {} }); }
     if (request.method === 'initialize') {
       const p = request.params;
       if (phase !== 'new' || !isObject(p) || typeof p.protocolVersion !== 'string' || p.protocolVersion.length > 100 || !isObject(p.capabilities) || !isObject(p.clientInfo) || typeof p.clientInfo.name !== 'string' || typeof p.clientInfo.version !== 'string') {
-        error(id, -32602, 'Invalid or repeated initialization.'); return;
+        return errorResponse(id, -32602, 'Invalid or repeated initialization.');
       }
       phase = 'initialized';
-      send({ jsonrpc: '2.0', id, result: { protocolVersion: MCP_VERSION, capabilities: { tools: {} },
+      return sendResponse({ jsonrpc: '2.0', id, result: { protocolVersion: MCP_VERSION, capabilities: { tools: {} },
         serverInfo: { name: 'antigravity-broker-connector', version: '0.1.1' },
         instructions: instructions ?? 'Production requires native automatic delivery; a loaded MCP transport alone is not readiness. Read after a native notice, then acknowledge the exact message_id. Receipt and retry keys stay internal. Manual pulls are diagnostic/test-only.' } });
       return;
     }
-    if (phase !== 'ready') { error(id, -32000, 'Complete initialize and notifications/initialized first.'); return; }
+    if (phase !== 'ready') { return errorResponse(id, -32000, 'Complete initialize and notifications/initialized first.'); }
     if (request.method === 'tools/list') {
-      if (request.params !== undefined && (!isObject(request.params) || Object.keys(request.params).length)) { error(id, -32602, 'Tool pagination is not supported.'); return; }
-      send({ jsonrpc: '2.0', id, result: { tools: definitions.filter(definition => typeof tools[definition.name] === 'function') } }); return;
+      if (request.params !== undefined && (!isObject(request.params) || Object.keys(request.params).length)) { return errorResponse(id, -32602, 'Tool pagination is not supported.'); }
+      return sendResponse({ jsonrpc: '2.0', id, result: { tools: definitions.filter(definition => typeof tools[definition.name] === 'function') } });
     }
     if (request.method === 'tools/call') {
       const p = request.params, definition = definitions.find(item => item.name === p?.name);
       if (!isObject(p) || Object.keys(p).some(key => !['name', 'arguments', '_meta'].includes(key)) || !definition || typeof tools[definition.name] !== 'function' || !validArguments(p.arguments ?? {}, definition.inputSchema)) {
-        error(id, -32602, 'Unknown tool or invalid bounded arguments.'); return;
+        return errorResponse(id, -32602, 'Unknown tool or invalid bounded arguments.');
       }
       // JSON-RPC IDs can be reused after completion: they are not durable intent IDs.
       // Each admitted invocation is new; HTTP retry/reconnect recovery retains its private key.
-      const result = await invokeTool(tools, p.name, p.arguments ?? {}, { signal: transportAbort.signal });
+      const context = { signal: transportAbort.signal };
+      if (nativeTransportMetadata) context.setResponseGuard = guard => {
+        if (typeof guard !== 'function') throw Error('invalid_response_guard');
+        responseState.guard = guard;
+      };
+      if (nativeTransportMetadata) {
+        try { context.nativeMeta = boundedNativeTransportMetadata(p._meta); }
+        catch { return errorResponse(id, -32602, 'Invalid native transport metadata.'); }
+      }
+      if (nativeTransportMetadata) responseState.guard = () => false;
+      const result = await invokeTool(tools, p.name, p.arguments ?? {}, context);
       const presented = readableNativeReceive && p.name === 'broker_receive' ? readableReceive(result) : null;
-      send({ jsonrpc: '2.0', id, result: presented ?? { content: [{ type: 'text', text: canonical(result) }], isError: Boolean(result?.error) } }, presented ? maxReceiveResponseBytes : maxResponseBytes); return;
+      return sendResponse({ jsonrpc: '2.0', id, result: presented ?? { content: [{ type: 'text', text: canonical(result) }], isError: Boolean(result?.error) } }, presented ? maxReceiveResponseBytes : maxResponseBytes);
     }
-    error(id, -32601, 'Method not supported by this tools-only stdio server.');
+    return errorResponse(id, -32601, 'Method not supported by this tools-only stdio server.');
   }
 
   function frame(line) {
@@ -142,7 +175,8 @@ export function serveStdio({ input = process.stdin, output = process.stdout, too
     if (requestIds.has(key)) { error(request.id, -32600, 'Request ID is already in flight; reconcile before retrying.'); return; }
     if (active >= maxInflight) { void close('stdio_capacity_exceeded'); return; }
     requestIds.add(key); active++;
-    dispatch(request).catch(() => error(request.id, -32603, 'Tool result unavailable; reconcile the original operation.'))
+    const responseState = { guard: undefined };
+    dispatch(request, responseState).catch(() => send({ jsonrpc: '2.0', id: request.id, error: { code: -32603, message: 'Tool result unavailable; reconcile the original operation.' } }, maxResponseBytes, responseState.guard))
       .finally(() => { requestIds.delete(key); active--; });
   }
   function onData(chunk) {
