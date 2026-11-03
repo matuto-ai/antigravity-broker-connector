@@ -115,3 +115,28 @@ This is **not** proof of authenticated vendor-model behavior, the user's install
 version, or unattended message wakeup. Actual send/receive/ACK, idle/busy wakeup,
 permission rejection, disconnect/restart and conversation-only cleanup remain
 separate live acceptance gates. No release or 1.0 readiness is implied.
+
+## Isolated native message-path qualification
+
+`run-actual.sh` also runs a `messages` mode against the same pinned official CLI
+1.4.7, current production plugin and disposable TLS Psst, with external networking
+removed. It grants only setup-status, identity, send, receive and explicit ACK to
+that fixture. Its provider script sends one benign message to a separately
+registered fixture peer, reads an inbound multiline Unicode message twice,
+acknowledges the exact observed message ID twice, and finally requires an empty
+inbox. A truncated body, wrong sender/message, uncorrelated tool response or
+fabricated action-success/native-consumption receipt fails the proof.
+
+Passing this mode establishes that native tool output reached the synthetic
+provider context, not just that MCP returned exit code zero. Read-only journal
+checks additionally require the message to remain pending through both reads and
+to become consumed only after explicit ACK. The broker must retain exactly one
+outbound send, still queued for the fixture peer. Transport delivery and explicit
+model-read acknowledgment are checked as different boundaries.
+
+The inexpensive `test/native-message-qualification.test.mjs` first checks the
+same message sequence using real TLS and production session tools; its native
+wrapper is synthetic and does not substitute for the Docker/official-CLI result.
+Neither test establishes vendor-model authentication, URL/admin enrollment,
+unattended idle/busy wakeup, actual owner installation or conversation-only
+cleanup. Those remaining acceptance gates keep issue #8 open.

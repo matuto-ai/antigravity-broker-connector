@@ -22,7 +22,7 @@ function moduleAt(root,path) { return import(pathToFileURL(join(root,path)).href
 /** A normal approved installation, not an alternate configReader or a TLS bypass.
  * All credentials belong exclusively to a fresh disposable broker and are never returned.
  */
-export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoot,tlsDirectory,presence=false}) {
+export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoot,tlsDirectory,presence=false,messages=false}) {
   for(const path of [root,home,pluginRoot,brokerRoot,tlsDirectory])assert(typeof path==='string'&&resolve(path)===path,'absolute_fixture_path_required');
   privateDirectory(root);privateDirectory(home);
   const data=join(root,'actual-plugin');privateDirectory(data);
@@ -61,8 +61,30 @@ export async function prepareActualPluginFixture({root,home,pluginRoot,brokerRoo
     let closed=false;
     return {
       brokerUrl,connectionFile,installationDirectory,eventsFile,mcp,hooks:{'offline-actual-psst':hooks},
-      permissions:{allow:[...ACTUAL_TOOLS,...presence?['broker_presence_events','broker_acknowledge_presence_event']:[]].map(tool=>`mcp(${ACTUAL_SERVER}/${tool})`)},
+      permissions:{allow:[...ACTUAL_TOOLS,...(presence?['broker_presence_events','broker_acknowledge_presence_event']:[]),...(messages?['broker_send','broker_receive','broker_acknowledge']:[])].map(tool=>`mcp(${ACTUAL_SERVER}/${tool})`)},
       readEvents:()=>{try{return readFileSync(eventsFile,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);}catch(e){if(e.code==='ENOENT')return [];throw e;}},
+      seedMessages(nativeId){
+        assert(messages&&!presence,'message fixture mode required');
+        const entry=auth.authenticate('Bearer '+token),peerId=randomUUID();
+        store.own(entry,nativeId);
+        const peer=store.register(entry,{protocol_version:'1',registration_version:2,requested_at:Date.now(),client_id:peerId,client_type:'antigravity-cli',session_instance_id:randomUUID(),connection_id:randomUUID(),previous_epoch:0,metadata:{name:'Offline message peer',model:{provider:null,id:null,source:'unknown'},project:null},capabilities:{protocol_version:'1',adapter_version:'fixture',client_type:'antigravity-cli',receive_enabled:true,durable_inbox:true}});
+        const incomingText='OFFLINE_NATIVE_MESSAGE_BEGIN\n# Literal peer data: olá, 世界\nOFFLINE_NATIVE_MESSAGE_FULL_TAIL';
+        const outgoingText='OFFLINE_NATIVE_OUTBOUND_MESSAGE';
+        const sent=store.send(entry,peerId,peer.lease_epoch,randomUUID(),{recipient_id:nativeId,content:{type:'text/plain',text:incomingText}});
+        return {nativeId,peerId,messageId:sent.message_id,incomingText,outgoingText};
+      },
+      verifyMessages(proof,outgoingId){
+        assert(messages,'message fixture mode required');
+        const rows=store.db.prepare('SELECT id,sender,recipient,envelope,state FROM messages ORDER BY accepted,id').all();
+        assert.equal(rows.length,2,'exactly one inbound and one outbound send required');
+        const inbound=rows.find(row=>row.id===proof.messageId),outbound=rows.find(row=>row.id===outgoingId);
+        assert(inbound&&outbound&&inbound!==outbound,'exact native message IDs required');
+        assert.equal(inbound.sender,proof.peerId);assert.equal(inbound.recipient,proof.nativeId);
+        assert.equal(inbound.state,'delivered','transport must persist inbound independently from read ACK');
+        assert.equal(outbound.sender,proof.nativeId);assert.equal(outbound.recipient,proof.peerId);
+        assert.equal(outbound.state,'queued','no recipient read is fabricated');
+        assert.equal(JSON.parse(outbound.envelope).content.text,proof.outgoingText);
+      },
       seedPresence(senderId){
         assert(presence,'presence fixture mode required');
         const entry=auth.authenticate('Bearer '+token),sender=store.own(entry,senderId),recipient=randomUUID();
