@@ -11,10 +11,10 @@ function objects(value,depth=0){
 // Prefix display is a fixed vocabulary projection, not arbitrary string logging.
 export function nativeNoticeShape(text){
  const start=text.indexOf('{'),prefix=(start<0?text:text.slice(0,start)).slice(0,512);
- const words=new Set(['A','pre-tool','it','ran','ran.','Hook','hook','hooks','Tool','tool','call','arguments','Arguments','argument','modified','changed','overwritten','overwrite','PreToolUse','Note','note','The','the','following','by','was','were','has','have','been','to','from','with','and','for','before','execution','result','results','output','input','parameters','parameter','This','this','is','a','an','of','on','keys','key']);
+ const words=new Set(['Changed','Arguments.','Start','End','time','Time','Timestamp','Server','Name','Call','Request','Response','Invocation','Execution','Started','Finished','UTC','GMT','changed','arguments.','start','end','timestamp','server','name','call','request','response','invocation','execution','started','finished','utc','gmt','A','pre-tool','it','ran','ran.','Hook','hook','hooks','Tool','tool','call','arguments','Arguments','argument','modified','changed','overwritten','overwrite','PreToolUse','Note','note','The','the','following','by','was','were','has','have','been','to','from','with','and','for','before','execution','result','results','output','input','parameters','parameter','This','this','is','a','an','of','on','keys','key']);
  const punctuation=new Set([':',',','.',';','(',')','[',']',"'",'"','`','-','=','>','<']);
  const tokens=prefix.match(/[A-Za-z0-9_/@.%+\-]+|[\s\S]/g)??[];
- const shape=tokens.slice(0,96).map(token=>words.has(token)?token:/^\s$/.test(token)?' ':punctuation.has(token)?token:'?').join('').replace(/ +/g,' ').trim();
+ const shape=tokens.slice(0,96).map(token=>words.has(token)?token:token==='\n'?'\n':/^\s$/.test(token)?' ':punctuation.has(token)?token:'?').join('').replace(/ +/g,' ').trim();
  let trailingObject=false;
  if(start>=0){try{const value=JSON.parse(text.slice(start));trailingObject=Boolean(value&&typeof value==='object'&&!Array.isArray(value));}catch{}}
  return {shape,prefixTruncated:(start<0?text.length:start)>512||tokens.length>96,hasObjectStart:start>=0,trailingObject};

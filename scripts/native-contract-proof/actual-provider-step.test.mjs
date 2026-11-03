@@ -40,3 +40,8 @@ test('verified static native notice words remain visible without allowing unknow
  const notice='A pre-tool hook changed the arguments of this tool call before it ran.';
  const result=nativeNoticeShape(notice+'\n{"connected":true}');assert.equal(result.shape,notice);assert(result.trailingObject);
 });
+
+test('notice projection preserves line boundaries and masks times with only fixed new words',()=>{
+ const shape=nativeNoticeShape('Start Time: 2026-11-03 00:52:23 UTC\nEnd Time: 2026-11-03 00:52:24 UTC\nA pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.\n{"connected":true}').shape;
+ assert.equal(shape,'Start Time: ? ?:?:? UTC\nEnd Time: ? ?:?:? UTC\nA pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.');assert(!/2026|52|23/.test(shape));
+});
