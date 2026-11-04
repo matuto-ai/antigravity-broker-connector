@@ -1,5 +1,6 @@
 import {nativePermissionBoundaryVerified} from './permission-state.mjs';
 import test from 'node:test';
+import {spawn} from 'node:child_process';
 import assert from 'node:assert/strict';
 import {pendingNativeCommandPermission as pending} from './permission-state.mjs';
 test('actual native command permission is a stop boundary, never implicit approval',()=>{
@@ -46,11 +47,29 @@ test('approval waiter uses the same exact one-time UI contract and cannot substi
 });
 
 test('permission boundary cannot count prompt observation as execution or arrival acceptance',()=>{
- const valid={mode:'setup',confirmationBudget:0,permissionConfirmations:0,nativePermissionBlocked:true,provenanceVerified:true,commandCount:1,promptRecognized:true,inboxProcesses:0,approvalProcesses:0,waiterCompleted:0,approvalWaiterCompleted:0,rearmCompleted:0,messagesCompleted:0,idleSeeded:false,approvalGranted:false,permissionsUnchanged:true,shutdownVerified:true,nativeSignal:'SIGTERM',providerFailure:null,parserFailed:false,timedOut:false,overflow:false,collectionUnchecked:true,termsAccepted:true,trustConfirmationSent:true,consentBlocked:false};
+ const valid={mode:'setup',confirmationBudget:0,permissionConfirmations:0,nativePermissionBlocked:true,provenanceVerified:true,commandCount:1,promptRecognized:true,inboxProcesses:0,approvalProcesses:0,waiterCompleted:0,approvalWaiterCompleted:0,rearmCompleted:0,messagesCompleted:0,idleSeeded:false,approvalGranted:false,permissionsUnchanged:true,shutdownVerified:true,boundaryStopSignalSent:true,nativeExit:null,nativeSignal:'SIGTERM',providerFailure:null,parserFailed:false,timedOut:false,overflow:false,collectionUnchecked:true,termsAccepted:true,trustConfirmationSent:true,consentBlocked:false};
  assert.equal(nativePermissionBoundaryVerified(valid),true);
+ // The real util-linux PTY wrapper also exits 0 after handling our SIGTERM.
+ assert.equal(nativePermissionBoundaryVerified({...valid,nativeSignal:null,nativeExit:0}),true);
+ for(const nativeExit of [1,130,143,null])assert.equal(nativePermissionBoundaryVerified({...valid,nativeSignal:null,nativeExit}),false);
+ assert.equal(nativePermissionBoundaryVerified({...valid,nativeSignal:null,nativeExit:0,boundaryStopSignalSent:false}),false);
  for(const mode of ['idle','busy'])assert.equal(nativePermissionBoundaryVerified({...valid,mode}),true);
  for(const [key,value] of Object.entries(valid)){
   const invalid=typeof value==='boolean'?!value:typeof value==='number'?value+1:value===null?'failure':'invalid';
   assert.equal(nativePermissionBoundaryVerified({...valid,[key]:invalid}),false,key);
  }
+});
+
+test('PTY wrapper termination is recorded separately from the requested stop signal', {timeout:5000}, async t=>{
+ const source='process.on("SIGHUP",()=>process.exit(0));setTimeout(()=>process.exit(99),3500);console.log("WRAPPER_READY")';
+ const child=spawn('script',['-q','-e','-c',`${process.execPath} -e '${source}'`,'/dev/null'],{stdio:['pipe','pipe','pipe']});
+ t.after(()=>{if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');});
+ let stopSignalSent=false,output='';
+ child.stdout.on('data',chunk=>{
+  output+=chunk;
+  if(!stopSignalSent&&output.includes('WRAPPER_READY'))stopSignalSent=child.kill('SIGTERM');
+ });
+ const result=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',(code,signal)=>resolve({code,signal}));});
+ assert.equal(stopSignalSent,true);
+ assert((result.signal==='SIGTERM'&&result.code===null)||(result.signal===null&&result.code===0),JSON.stringify(result));
 });
