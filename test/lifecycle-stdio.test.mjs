@@ -32,3 +32,29 @@ test('new lifecycle calls preserve arguments; reused completed JSON-RPC IDs are 
  const bad=await f.call('tools/call',{name:'broker_send',arguments:{recipient_id:uuid,text:'x',send_key:'private'}});assert.equal(bad.error.code,-32602);assert.equal(seen.length,4);
  await f.server.close();assert.equal(seen[0].context.signal.aborted,true);
 });
+
+test('authorized ping fixture transports exact reply IDs after read ACK without another confirmation field', async t => {
+ // A scripted authorized caller, not a live-model behavioral test.
+ const sender='11111111-1111-4111-8111-111111111111', message='22222222-2222-4222-8222-222222222222';
+ const seen=[];
+ const tools={
+  broker_receive:async()=>{seen.push('receive');return {message_id:message,sender_client_id:sender,text:'Please reply pong',correlation_id:'authorized-ping'};},
+  broker_acknowledge:async args=>{seen.push(['ack',args]);return {acknowledged:true};},
+  broker_send:async args=>{seen.push(['send',args]);return {status:'accepted',message_id:'33333333-3333-4333-8333-333333333333'};},
+ };
+ const f=rpc(tools);t.after(()=>f.server.close());await f.ready();
+ const received=await f.call('tools/call',{name:'broker_receive',arguments:{}});
+ assert.equal(received.result.isError,false);
+ // The fixture reads the complete structured response before its ACK.
+ const envelope=JSON.parse(received.result.content[0].text);
+ assert.equal(envelope.text,'Please reply pong');
+ await f.call('tools/call',{name:'broker_acknowledge',arguments:{message_id:envelope.message_id}});
+ const result=await f.call('tools/call',{name:'broker_send',arguments:{
+  recipient_id:envelope.sender_client_id,reply_to_message_id:envelope.message_id,
+  correlation_id:envelope.correlation_id,text:'pong',
+ }});
+ assert.equal(result.result.isError,false);
+ assert.deepEqual(seen,['receive',['ack',{message_id:message}],['send',{
+  recipient_id:sender,reply_to_message_id:message,correlation_id:'authorized-ping',text:'pong',
+ }]]);
+});
