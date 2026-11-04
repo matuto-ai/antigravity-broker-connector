@@ -11,7 +11,7 @@ Issue 8 remains open until the remaining observations are established.
 | Ordinary startup reuses authorization; distinct conversations remain independent | Existing 30-journal Docker recreation and native root/compact/new tests | Native-manager and supported-launcher recreation with retained installation/history paths |
 | Full message read followed by explicit exact-ID ACK | Merged official CLI 1.4.7 send/read/repeat-read/ACK/repeat-ACK/empty qualification | Authenticated owner-environment automatic arrival |
 | Automatic idle and busy receive without manual prompting | Official CLI 1.4.7 isolated idle/busy arrival, full read/ACK, one re-arm and clean shutdown at `0734995`; setup first delivery at `6e64c71` | Setup re-arm and authenticated human-input/denial matrix remain |
-| Supported installation/upgrade through actual `agy` wrapper | Official manager install/reinstall, read-only launcher and managed-package doctor | Current owner wrapper/import policy/active-owner outcome and version after restart |
+| Supported native installation/upgrade | Official manager install/reinstall, read-only launcher and managed-package doctor | Actual installation/owner-conflict/import-denial outcomes and version after supported restart |
 | Preserve old authorization, unread messages and identity across upgrade | Existing journal/installation persistence and compatibility tests | Supported native-manager upgrade/restart with those retained paths |
 | Clean up conversation lifetime without acting on stale identity | Native host/MCP shutdown, disconnect, root transition and process/epoch fencing | No supported conversation-deletion hook has been established; `Stop` is not deletion |
 
@@ -22,6 +22,25 @@ managed registration/package/version separately. It neither invokes a nested
 host nor reads credentials, permission settings or owner locks. It does not
 claim that import is permitted, the plugin is enabled, or the running host has
 loaded the inspected package.
+
+The running MCP server now reports the package version rather than the stale
+hardcoded `0.1.1`. Native `broker_setup_status.connector_runtime` exposes the same
+startup metadata without setup or a new tool. Packed-install and isolated process
+restart tests check its consistency; this does not replace owner-host restart,
+loaded-component or automatic-delivery observations.
+
+`agy` is also the official CLI command, not evidence of a custom wrapper. The
+historical sandbox reference does not establish a current deployment dependency.
+Use the existing native `/plugin` manager in an active TUI; official
+`agy plugin list --json` is the standalone installed/enabled/version surface.
+No new custom-wrapper capability endpoint is required by this checklist.
+
+Automatic candidate assembly now links source commit/tree and file hashes to one
+offline-installed tarball. Unit/integration tests execute that package's runtime
+bytes, and native qualification verifies both the mounted artifact and the
+reported running version. Publication reuses the tested tarball and checks the
+registry receipt. These guards prevent stale labels or source/artifact divergence
+from silently passing; they do not establish the remaining owner-host observations.
 
 Terminal setup outcomes are retained with their exact request ID. A reopened
 manager reports denied, expired or revoked without another enrollment or poll.

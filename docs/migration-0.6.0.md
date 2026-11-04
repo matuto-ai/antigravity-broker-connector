@@ -17,6 +17,11 @@ Repository and package metadata intentionally point to the final name. Version `
 
 Only distribution names change. Existing MCP tool names, protocol/server identity, environment variables, storage paths and credential/journal formats remain unchanged. Never install both package names at once. Updating an npm package does not necessarily update the native plugin source already registered in the host.
 
+MCP `serverInfo.name` and negotiated `protocolVersion` retain their existing
+values. `serverInfo.version` reports this implementation's package version, not
+the old hardcoded `0.1.1`. Native `broker_setup_status.connector_runtime` exposes
+the same startup version for post-restart comparison; it is not host attestation.
+
 Keep plugin `psst-native`, MCP namespace and `psst-antigravity` CLI. Replace the old package source through the normal native `/plugin` manager while preserving its private configuration and installation state. If a native owner lock or import denial occurs, stop; do not delete locks or change identity. This rename does not repair or resume the separately blocked native hook work.
 
 References: [npm deprecation](https://docs.npmjs.com/deprecating-and-undeprecating-packages-or-package-versions/) · [trusted publishers](https://docs.npmjs.com/trusted-publishers/).

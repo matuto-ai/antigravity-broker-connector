@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { PassThrough, Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { serveStdio, TOOL_DEFINITIONS } from '../src/mcp-stdio.mjs';
+import packageInfo from '../package.json' with { type: 'json' };
 const ids=['broker_sent_history','broker_message_content','broker_resend','broker_cancel'];
 function rpc(tools){
  const input=new PassThrough(),responses=[];let text='';
@@ -17,6 +18,11 @@ test('lifecycle catalog is bounded and never asks the model for a retry key',()=
  for(const name of ids)assert.ok(TOOL_DEFINITIONS.some(d=>d.name===name),name);
  for(const name of ['broker_send','broker_resend']){const d=TOOL_DEFINITIONS.find(d=>d.name===name);assert.equal(d.inputSchema.additionalProperties,false);assert.equal(Object.hasOwn(d.inputSchema.properties,'send_key'),false);}
  assert.deepEqual(TOOL_DEFINITIONS.find(d=>d.name==='broker_cancel').inputSchema.required,['message_id']);
+});
+test('MCP initialization reports the running connector package version',async t=>{
+ const f=rpc({});t.after(()=>f.server.close());
+ const response=await f.call('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'fixture',version:'1'}});
+ assert.deepEqual(response.result.serverInfo,{name:'antigravity-broker-connector',version:packageInfo.version});
 });
 test('new lifecycle calls preserve arguments; reused completed JSON-RPC IDs are not false intent identities',async t=>{
  const seen=[];const tools=Object.fromEntries([...ids,'broker_send'].map(name=>[name,async(args,context)=>{seen.push({name,args,context});return {ok:true};}]));

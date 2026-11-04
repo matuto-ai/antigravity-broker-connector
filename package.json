@@ -6,7 +6,7 @@
     "node": ">=24.19.0 <25"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "node scripts/test-stage.mjs all",
     "check": "find src bin test vendor scripts -name \"*.mjs\" -print0 | xargs -0 -r -n1 node --check",
     "test:pack": "node scripts/pack-smoke.mjs",
     "test:local": "node scripts/test-stage.mjs local",

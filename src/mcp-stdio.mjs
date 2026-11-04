@@ -4,6 +4,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { readableReceive } from './receive-presentation.mjs';
 import { canonical, validateUuid } from '../vendor/psst/src/protocol.mjs';
 import { invokeTool } from '../vendor/psst/reference/tools.mjs';
+import { CONNECTOR_RUNTIME } from './runtime-info.mjs';
 
 /** Minimal MCP 2025-06-18 stdio tools only; not HTTP MCP, channels, or a TUI wakeup API. */
 export const MCP_VERSION = '2025-06-18';
@@ -123,7 +124,7 @@ export function serveStdio({ input = process.stdin, output = process.stdout, too
       }
       phase = 'initialized';
       return sendResponse({ jsonrpc: '2.0', id, result: { protocolVersion: MCP_VERSION, capabilities: { tools: {} },
-        serverInfo: { name: 'antigravity-broker-connector', version: '0.1.1' },
+        serverInfo: { name: 'antigravity-broker-connector', version: CONNECTOR_RUNTIME.version },
         instructions: instructions ?? 'Production requires native automatic delivery; a loaded MCP transport alone is not readiness. Read after a native notice, then acknowledge the exact message_id. Receipt and retry keys stay internal. Manual pulls are diagnostic/test-only.' } });
       return;
     }

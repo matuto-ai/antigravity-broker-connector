@@ -10,6 +10,9 @@ tmp="$(mktemp -d)"
 name="psst-agy-actual-$(date +%s)-$$"
 cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; rm -rf "$tmp"; }
 trap cleanup EXIT
+candidate="${PSST_CANDIDATE_DIR:-$tmp/candidate}"
+if [[ -z "${PSST_CANDIDATE_DIR:-}" ]]; then node "$repo/scripts/candidate-artifact.mjs" prepare "$repo" "$candidate"; fi
+package="$(node "$repo/scripts/candidate-artifact.mjs" package-root "$repo" "$candidate")"
 image='node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df'
 docker version >/dev/null
 docker pull "$image" >/dev/null
@@ -39,12 +42,9 @@ openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 -subj /CN=offline-psst
 # Publicly readable only within this disposable fixture staging directory; never user keys.
 chmod 755 "$tmp/tls" "$tmp/psst" "$tmp/psst/src" "$tmp/psst/scripts"
 chmod 644 "$tmp/tls/key.pem" "$tmp/tls/cert.pem"
-PSST_APPROVAL_FIXTURE_CONNECTOR_ROOT="$repo" PSST_APPROVAL_FIXTURE_BROKER_ROOT="$tmp/psst" node --test "$fixture/approval-broker-fixture.test.mjs" "$fixture/permission-state.test.mjs" "$fixture/waiter-authorization.test.mjs" "$fixture/waiter-boundary.test.mjs" "$fixture/setup-provider-step.test.mjs" "$fixture/waiter-provider-step.test.mjs" "$fixture/presence-provider-step.test.mjs" "$fixture/message-provider-step.test.mjs" "$fixture/actual-provider-step.test.mjs" "$fixture/actual-compact-state.test.mjs"
-mounts=(--mount "type=bind,src=$tmp/antigravity,dst=/native/antigravity,readonly")
-for dir in src bin vendor; do
-  [[ -d "$repo/$dir" && ! -L "$repo/$dir" ]] || exit 1
-  mounts+=(--mount "type=bind,src=$repo/$dir,dst=/plugin/$dir,readonly")
-done
+PSST_APPROVAL_FIXTURE_CONNECTOR_ROOT="$package" PSST_APPROVAL_FIXTURE_BROKER_ROOT="$tmp/psst" node --test "$fixture/approval-broker-fixture.test.mjs" "$fixture/permission-state.test.mjs" "$fixture/waiter-authorization.test.mjs" "$fixture/waiter-boundary.test.mjs" "$fixture/setup-provider-step.test.mjs" "$fixture/waiter-provider-step.test.mjs" "$fixture/presence-provider-step.test.mjs" "$fixture/message-provider-step.test.mjs" "$fixture/actual-provider-step.test.mjs" "$fixture/actual-compact-state.test.mjs"
+# Execute the complete verified installed tarball, never a partial checkout mount.
+mounts=(--mount "type=bind,src=$tmp/antigravity,dst=/native/antigravity,readonly" --mount "type=bind,src=$package,dst=/plugin,readonly" --mount "type=bind,src=$candidate/candidate.json,dst=/candidate.json,readonly" --mount "type=bind,src=$repo/scripts/candidate-artifact.mjs,dst=/fixture/candidate-artifact.mjs,readonly")
 for file in actual-worker.mjs actual-plugin-fixture.mjs approval-broker-fixture.mjs setup-provider-step.mjs permission-state.mjs waiter-authorization.mjs waiter-boundary.mjs waiter-provider-step.mjs message-provider-step.mjs actual-provider-step.mjs presence-provider-step.mjs actual-compact-state.mjs composer-state.mjs trust-state.mjs xterm-screen.mjs consent-state-navigation.mjs; do
  mounts+=(--mount "type=bind,src=$fixture/$file,dst=/fixture/$file,readonly")
 done
@@ -66,4 +66,5 @@ for mode in "${modes[@]}"; do
  docker rm -f "$name" >/dev/null 2>&1 || true
  if [[ "$mode" == root && "$status" != 0 ]]; then break; fi
 done
+node "$repo/scripts/candidate-artifact.mjs" verify "$repo" "$candidate"
 exit "$status"

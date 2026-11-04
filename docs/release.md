@@ -14,10 +14,13 @@ it does not assert that npm already hosts the package.
    security configuration performed by the maintainer, not by this code change.
 4. Set package version and create a GitHub release whose tag is exactly
    `v<package.json version>` on the reviewed commit (`v0.6.0` for this release).
-5. The workflow runs syntax checks, all tests, and an isolated tarball install;
-   only then it runs `npm publish --access public --provenance --ignore-scripts`.
-6. Verify the workflow result and `npm view @matuto-ai/antigravity-psst-connector@0.6.0`
-   before advertising the npm install command.
+5. The workflow records the exact commit/tree, builds one tarball, and runs all
+   tests against its verified installed bytes. Only then it publishes that same
+   tarball with provenance; it never repacks source after testing.
+6. The final read-only registry check must confirm name, version, tarball integrity
+   and `latest` match the tested artifact before the workflow reports success.
+   A missing or divergent publication fails visibly, without republishing or
+   changing tags automatically.
 
 The workflow follows the user's existing release/OIDC pattern, with test and
 version gates added. It does not need a long-lived NPM_TOKEN in source or workflow.

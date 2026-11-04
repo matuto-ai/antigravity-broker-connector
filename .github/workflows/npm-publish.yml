@@ -35,7 +35,19 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: node --input-type=module -e "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync('package.json')); if(p.name !== '@matuto-ai/antigravity-psst-connector' || process.env.RELEASE_TAG !== 'v'+p.version) process.exit(1)"
+      - name: Build exact release candidate
+        working-directory: antigravity-review-pair
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          node scripts/candidate-artifact.mjs prepare "$PWD" "$RUNNER_TEMP/antigravity-candidate" --require-clean
+          echo "PSST_CANDIDATE_DIR=$RUNNER_TEMP/antigravity-candidate" >> "$GITHUB_ENV"
       - run: npm run check && npm test && npm run test:pack
         working-directory: antigravity-review-pair
-      - run: npm publish --access public --provenance --ignore-scripts
+      - name: Publish the tested artifact
+        run: |
+          package_file="$(node scripts/candidate-artifact.mjs tarball-path "$PWD" "$PSST_CANDIDATE_DIR" --require-clean)"
+          npm publish "$package_file" --access public --provenance --ignore-scripts
+        working-directory: antigravity-review-pair
+      - name: Verify published version and artifact
+        run: node scripts/verify-published-artifact.mjs "$PWD" "$PSST_CANDIDATE_DIR"
         working-directory: antigravity-review-pair

@@ -32,6 +32,12 @@ jobs:
       - name: Check source syntax
         run: npm run check
         working-directory: antigravity-review-pair
+      - name: Build and verify current package
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          node scripts/candidate-artifact.mjs prepare "$PWD" "$RUNNER_TEMP/antigravity-candidate" --require-clean
+          echo "PSST_CANDIDATE_DIR=$RUNNER_TEMP/antigravity-candidate" >> "$GITHUB_ENV"
+        working-directory: antigravity-review-pair
       - name: Run local tests
         run: npm run test:local
         working-directory: antigravity-review-pair
