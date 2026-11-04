@@ -97,3 +97,36 @@ test('close joins superseded approval preparation as well as replacement loop',a
  await m.resume();await entered.promise;await m.resume();assert.equal(polls,2);m.close();let drained=false;const done=m.done.then(()=>{drained=true;});latest.resolve(r);await new Promise(r=>setImmediate(r));assert.equal(drained,false);
  prepare.resolve();await done;assert.equal(closed,1);assert.equal(commits,0);assert.equal(f.installation.selected(),null);
 });
+
+test('terminal denial, expiry and revocation survive restart without network or replacement',async t=>{
+ for(const state of ['denied','expired','revoked']){
+  const f=fixture(t),requestId=randomUUID();let posts=0;
+  const first=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>null,beginApproval:()=>{posts++;return {state,requestId};}},activate:{}});
+  await first.begin('https://broker.example');await first.done;first.close();
+  const restarted=createApprovalManager({installation:openInstallation(f.root,path=>f.configs.get(path)),api:{readApprovalState:()=>{throw Error('terminal must not read helper or network');},pollApproval:()=>{throw Error('terminal must not poll');},beginApproval:()=>{throw Error('terminal must not create replacement');}},activate:{}});
+  await restarted.resume();await restarted.done;
+  assert.deepEqual(restarted.status,{state,requestId});assert.equal(posts,1);assert.equal(f.installation.selected(),null);restarted.close();
+ }
+});
+test('locally known expiry stays visible after restart without another GET',async t=>{
+ const f=fixture(t),requestId=randomUUID(),requestExpiresAt='2000-01-01T00:00:00Z';f.installation.beginPending({brokerUrl:'https://broker.example',requestId,previousRevision:null});
+ const first=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>({state:'pending',requestId,requestExpiresAt}),pollApproval:()=>{throw Error('expired');}},activate:{}});
+ await first.resume();await first.done;first.close();
+ const next=createApprovalManager({installation:f.installation,api:{},activate:{}});await next.resume();assert.deepEqual(next.status,{state:'expired',requestId,requestExpiresAt});next.close();
+});
+test('stale terminal outcome cannot cancel another selected replacement request',t=>{
+ const f=fixture(t),previous=randomUUID(),current=randomUUID();
+ f.installation.beginPending({brokerUrl:'https://broker.example',requestId:previous,previousRevision:null});
+ assert.equal(f.installation.cancel({requestId:previous,state:'denied'}),true);
+ f.installation.beginPending({brokerUrl:'https://broker.example',requestId:current,previousRevision:null});
+ assert.equal(f.installation.cancel({requestId:previous,state:'expired'}),false);
+ assert.equal(f.installation.pending().requestId,current);assert.equal(f.installation.pending().cancelled,false);assert.equal(f.installation.pending().terminalState,undefined);
+});
+test('terminal replacement reason survives restart without discarding working authorization',async t=>{
+ const f=fixture(t),first=approved(f),requestId=randomUUID();
+ f.installation.beginPending({brokerUrl:'https://broker.example',requestId:first.requestId,previousRevision:null});const selected=f.installation.commit({...first,previousRevision:null});
+ const replacement=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>first,beginApproval:()=>({state:'denied',requestId})},activate:{}});
+ await replacement.begin('https://broker.example');await replacement.done;replacement.close();
+ const reopened=createApprovalManager({installation:f.installation,api:{},activate:{}});reopened.adopt(selected);await reopened.resume();
+ assert.deepEqual(reopened.status,{state:'denied',requestId});assert.equal(f.installation.selected().revision,selected.revision);assert.equal(f.installation.selected().credentialId,first.credentialId);reopened.close();
+});

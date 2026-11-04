@@ -14,7 +14,7 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
   if(!current(epoch,p))return;
   if(result.requestId!==p.requestId)throw Error('approval_request_mismatch');
   if(result.state!=='approved')publish(result);
-  if(['denied','expired','revoked'].includes(result.state)){installation.cancel();return;}
+  if(['denied','expired','revoked'].includes(result.state)){installation.cancel(publicState(result));return;}
   if(result.state==='approved'){
    const candidate=await activate.prepare(result.connectionFile);
    let staged,selected=false;
@@ -25,7 +25,7 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
  async function loop(p,epoch,initial,pendingDeadline){
   let result=initial,failures=0,expiresAt=pendingDeadline??(initial?.state==='pending'?initial.requestExpiresAt:undefined);
   while(current(epoch,p)){
-   if(expiresAt&&Date.parse(expiresAt)<=Date.now()){publish({state:'expired',requestId:p.requestId,requestExpiresAt:expiresAt});installation.cancel();return;}
+   if(expiresAt&&Date.parse(expiresAt)<=Date.now()){publish({state:'expired',requestId:p.requestId,requestExpiresAt:expiresAt});installation.cancel({state:'expired',requestId:p.requestId,requestExpiresAt:expiresAt});return;}
    try{
     if(!result)result=await api.pollApproval(options(p));
     if(!current(epoch,p))return;
@@ -61,7 +61,7 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
   async resume(){
    if(!alive())throw Error('approval_manager_closed');
    const startedGeneration=generation;
-   const p=installation.pending();if(!p||p.cancelled)return status;
+   const p=installation.pending();if(!p)return status;if(p.cancelled)return p.terminalState?publish({state:p.terminalState,requestId:p.requestId,...(p.requestExpiresAt?{requestExpiresAt:p.requestExpiresAt}:{})}):status;
    const saved=await api.readApprovalState(options(p));if(!alive()||generation!==startedGeneration)return status;if(!saved)return publish({state:'setup_needed',requestId:p.requestId});
    if(p.requestId!==null&&p.requestId!==saved.requestId)throw Error('approval_request_mismatch');
    const recovered=p.requestId===null?installation.beginPending({...p,requestId:saved.requestId}):p;

@@ -10,7 +10,35 @@ printf '%s  %s\n' 'beda760587589f5827b0b516c3ec2c5bd5cd2e91eb0e2533807ba1e990a27
 tar -xzf "$tmp/cli.tgz" -C "$tmp"
 mkdir -m 700 "$tmp/home"
 export HOME="$tmp/home"
-test "$("$tmp/antigravity" --version)" = '1.4.7'
-"$tmp/antigravity" plugin validate "$root" --strict --json
-"$tmp/antigravity" plugin install "$root"
-"$tmp/antigravity" plugin list --json
+# Invoke only the manager in a fresh environment, without inherited provider or
+# authentication variables. This does not launch a native conversation.
+native() { env -i HOME="$HOME" PATH="$PATH" LANG=C.UTF-8 "$tmp/antigravity" "$@"; }
+test "$(native --version)" = '1.4.7'
+native plugin validate "$root" --strict --json
+native plugin install "$root"
+native plugin list --json
+# Reinstall the same reviewed package with the supported manager, never by
+# deleting its registry/locks or writing a replacement config ourselves.
+native plugin install "$root"
+native plugin list --json > "$tmp/plugins.json"
+node --input-type=module - "$root" "$tmp/plugins.json" <<'JS'
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+const [root, listPath] = process.argv.slice(2);
+const { inspectNativeInstallation } = await import(pathToFileURL(join(root, 'src/native-installation.mjs')));
+const result = inspectNativeInstallation(root);
+assert.equal(result.native_installation, 'registered_package_verified');
+const list = JSON.parse(readFileSync(listPath, 'utf8'));
+assert.equal(list.length, 1);
+assert.equal(list[0].name, 'psst-native');
+assert.equal(list[0].enabled, true);
+assert.equal(list[0].version, result.package_version);
+assert.equal(list[0].path, result.managed_registration.plugin_directory);
+assert.equal(result.import_permission, 'not_checked');
+assert.equal(result.owner_lock, 'not_checked');
+console.log(JSON.stringify({ official_cli: '1.4.7', manager_install_reinstall: 'passed',
+  registered_version: result.package_version, wrapper_import_policy: 'not_checked',
+  authenticated_native_host: 'not_checked' }));
+JS

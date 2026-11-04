@@ -37,7 +37,8 @@
     "docs/message-lifecycle.md",
     "docs/candidate-verification.md",
     "docs/receive-presentation.md",
-    "docs/migration-0.6.0.md"
+    "docs/migration-0.6.0.md",
+    "docs/issue-8-acceptance.md"
   ],
   "repository": {
     "type": "git",

@@ -1,0 +1,31 @@
+name: Authorized isolated setup remainder
+on:
+  push:
+    branches: ['feat/complete-native-qualification']
+permissions:
+  contents: read
+jobs:
+  native_waiter_once:
+    # Remainder of the seven one-time executions approved on 2026-11-04.
+    # Run 41795315755 spent idle=2, setup=1, busy=2. Only setup=2 remain.
+    # No re-arm request, idle/busy repeat, PR event, future push or rerun.
+    if: github.repository == 'matuto-ai/antigravity-psst-connector' && github.event_name == 'push' && github.ref == 'refs/heads/feat/complete-native-qualification' && github.event.before == '073499521c0dc2493bd1f240abb4a5d0eea18e17' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: antigravity-review-pair
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: matuto-ai/psst
+          ref: f32ddc79ec7b812062ed3f6de7b9a0c12a7128f3
+          path: ai-agent-msg-broker
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+      - name: Run only the two unused setup executions
+        run: bash scripts/native-contract-proof/run-actual.sh "$PWD" authorized-setup-remainder
+        working-directory: antigravity-review-pair

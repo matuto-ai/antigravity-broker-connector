@@ -140,3 +140,29 @@ wrapper is synthetic and does not substitute for the Docker/official-CLI result.
 Neither test establishes vendor-model authentication, URL/admin enrollment,
 unattended idle/busy wakeup, actual owner installation or conversation-only
 cleanup. Those remaining acceptance gates keep issue #8 open.
+
+## Complete issue-8 candidate
+
+See [the original acceptance checklist](issue-8-acceptance.md) for remaining
+scope and the exact run ledger. The isolated official CLI 1.4.7 `idle` and `busy`
+cases passed at `0734995`: automatic arrival, full message read, exact-ID ACK,
+one re-arm, unchanged permissions and owned-process cleanup. Their provider was
+synthetic; they do not prove authenticated owner-host behavior.
+
+The same matrix's setup failed after approval because its broker fixture forced
+v2 while the real URL-only helper writes a documented v1-default bundle. The
+fixture now uses the broker's supported default. Real TLS regression covers both
+successful default activation and rejection under explicit v2 enforcement.
+
+The corrected setup first-delivery run passed at `6e64c71`, consuming the two
+remaining executions. All seven are now used. It proves real URL-only approval,
+automatic first delivery and full read/ACK with a distinct first-delivery-only
+result, not a setup re-arm. Full setup/re-arm acceptance,
+the actual supported owner launcher/upgrade and authenticated host checks remain
+open. No conversation-deletion hook, release or 1.0 readiness is implied.
+
+Default CI deliberately checks the exact unconfirmed native permission boundary
+with zero executions. Full automatic cases remain an explicit opt-in acceptance
+gate, documented with commands and historical authorized runs in the
+[CI scope](issue-8-acceptance.md#ci-scope-and-remaining-manual-acceptance-gate).
+Green default CI must not be described as complete authenticated native acceptance.
