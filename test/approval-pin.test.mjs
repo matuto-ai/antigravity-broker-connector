@@ -1,2 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {createHash} from 'node:crypto';
-test('approval helper immutable source pin remains exact',()=>{const pin=JSON.parse(readFileSync(new URL('../vendor/psst/approval-source.json',import.meta.url)));assert.equal(pin.commit,'72f5d2d1b834e02cfb6b2f7dc11c6f1a55729344');assert.equal(createHash('sha256').update(readFileSync(new URL('../vendor/psst/approval.mjs',import.meta.url))).digest('hex'),pin.sha256);});

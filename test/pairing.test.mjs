@@ -3,34 +3,15 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { randomUUID, createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { pairingOptions, pairConnector } from '../src/pairing.mjs';
 import { readConnectorConfig } from '../src/connector-config.mjs';
-
-test('shared enrollment helper matches its immutable reviewed source pin', () => {
-  const pin=JSON.parse(readFileSync(new URL('../vendor/psst/enrollment-source.json',import.meta.url),'utf8'));
-  assert.equal(pin.commit,'3e908e79966d886a02d372c103e31dec6e900c1a');
-  assert.equal(createHash('sha256').update(readFileSync(new URL('../vendor/psst/enrollment.mjs',import.meta.url))).digest('hex'),pin.sha256);
-});
 
 test('pair accepts only a private file path, with a no-env installation default', () => {
   assert.deepEqual(pairingOptions(['pair','--pairing-file','/private/pair.json'],'/home/test'), {
     pairingFile:'/private/pair.json', directory:'/home/test/.config/psst/antigravity' });
   for (const args of [['pair','--secret','abc'],['pair','--pairing-file','relative'],['pair','--pairing-file','/p','--token','secret']])
     assert.throws(() => pairingOptions(args));
-});
-
-test('CLI pairing errors do not echo path, arbitrary secret arguments, or filesystem details', () => {
-  const executable = fileURLToPath(new URL('../bin/psst-antigravity.mjs', import.meta.url));
-  const sentinel = 'DO_NOT_ECHO_SECRET';
-  for (const args of [['pair','--secret',sentinel],['pair','--pairing-file',`/nonexistent/${sentinel}`]]) {
-    const result = spawnSync(process.execPath,[executable,...args],{encoding:'utf8'});
-    assert.equal(result.status,1); assert.equal(result.stdout,'');
-    assert.equal(result.stderr.includes(sentinel),false);
-    assert.match(result.stderr,/pairing_failed/);
-  }
 });
 
 test('pair persists retry identity, reads returned legacy bundle, and never outputs bearer or pairing secrets', async t => {

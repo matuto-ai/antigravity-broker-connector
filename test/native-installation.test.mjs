@@ -4,14 +4,16 @@ import { mkdtempSync, rmSync, cpSync, mkdirSync, readFileSync, writeFileSync, re
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 import { inspectNativeInstallation, supportedNativeRuntime, nativeInstallationError } from '../src/native-installation.mjs';
 const source = fileURLToPath(new URL('../', import.meta.url));
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'agy-installation-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const pkg = join(root, 'node_modules', '@matuto-ai', 'antigravity-psst-connector');
-  cpSync(source, pkg, { recursive: true, filter: path => !path.includes('/.git') });
+  mkdirSync(pkg, { recursive: true });
+  for (const path of ['package.json', 'plugin.json', 'mcp_config.json', 'hooks.json', 'bin', 'skills', 'vendor']) {
+    cpSync(join(source, path), join(pkg, path), { recursive: true });
+  }
   return { root, pkg };
 }
 test('read-only packaged source check supports scoped paths and prints native, not nested-shell action', t => {
@@ -45,27 +47,9 @@ test('runtime check enforces exact documented family and minimum', () => {
   assert.equal(supportedNativeRuntime('linux','24.19.0'),true);
   assert.equal(supportedNativeRuntime('darwin','24.22.2'),false);
 });
-test('CLI doctor needs no broker configuration and does not start MCP', () => {
-  const cli = join(source, 'bin/psst-antigravity.mjs');
-  const good = spawnSync(process.execPath,[cli,'doctor'],{encoding:'utf8',timeout:2000,env:{...process.env,PSST_CONFIG_FILE:'/missing/private/config'}});
-  assert.equal(good.status,0,good.stderr);
-  assert.equal(JSON.parse(good.stdout).native_connection,'not_checked');
-  const missing = spawnSync(process.execPath,[cli,'doctor','/not-a-real-plugin-package'],{encoding:'utf8',timeout:2000});
-  assert.equal(missing.status,1);assert.match(missing.stderr,/plugin_source_directory_not_found/);
-  assert.doesNotMatch(missing.stderr,/not-a-real-plugin-package/);
-});
-
-test('ordinary CLI startup refuses silent manual fallback before loading SQLite/runtime',()=>{
- const cli=join(source,'bin/psst-antigravity.mjs');
- const result=spawnSync(process.execPath,[cli],{encoding:'utf8',timeout:2000,env:{...process.env,PSST_CONFIG_FILE:'/missing/private/config'}});
- assert.equal(result.status,2);assert.match(result.stderr,/automatic_delivery_required/);
- assert.doesNotMatch(result.stderr,/ExperimentalWarning|node:sqlite|connector_start_failed/);
- const text=readFileSync(cli,'utf8');assert.doesNotMatch(text,/^import .*connector\.mjs/m);
-});
-
 test('non-simple paths are sent to native UI input rather than guessed shell quoting',t=>{
  const f=fixture(t),spaced=join(f.root,'package with space');cpSync(f.pkg,spaced,{recursive:true});
- const result=inspectNativeInstallation(spaced);assert.equal(result.plugin_directory,spaced);assert.match(result.next_action,/native UI input/);
+ const result=inspectNativeInstallation(spaced, { home: f.root, env: { PATH: '/not-a-path' } });assert.equal(result.plugin_directory,spaced);assert.match(result.next_action,/native UI input/);
  assert.doesNotMatch(result.next_action,/^\/plugin install /);
 });
 

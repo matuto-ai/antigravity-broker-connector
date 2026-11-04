@@ -42,8 +42,8 @@ explicit application-level read acknowledgment, **not completion of the requeste
 work**.
 
 The [native integration](docs/setup.md) now supports URL-only setup and saved
-installation reconnection; [native acceptance evidence](docs/native-acceptance.md)
-separates tested transport/persistence from the outstanding authenticated wake gate.
+installation reconnection. The [setup guide](docs/setup.md) describes runtime
+requirements and the outstanding authenticated wakeup limitation.
 It never enables itself or changes native permission policy.
 
 ## Install and configure
@@ -119,29 +119,21 @@ that need separate addresses. Never claim exact-conversation isolation from MCP
 alone. Restart/reload creates a **new endpoint**; rediscover its ID. Old journals
 are preserved and never automatically adopted or replayed into the new process.
 
-Tests exercise real broker HTTP and SQLite plus stdio MCP client fixtures, FIFO
-and ACK failures, shutdown, package installation, and strict config handling.
-They do **not** certify the user's installed Antigravity binary, model response,
-or permission UI. That final live smoke test is intentionally left to the user.
-
 ## Development and publishing
 
 ```sh
 npm run check
 npm test
-npm run test:pack
 ```
 
-The complete test suite also checks the older experimental managed-CLI prototype
-and requires the pinned broker checkout alongside this repository. Runtime
-installation does not. CI provisions the checkout automatically. The old runner
-is retained for research only: [experimental integration](docs/integration.md).
+The unit suite tests connector behavior with injected dependencies, in-memory
+streams and temporary local stores. It needs no broker checkout, network, Docker,
+native CLI or model credentials. CI runs these same checks in one short job.
+See [unit-test scope](docs/verification.md).
 
-Tests automatically pack the current checkout and execute its installed runtime
-bytes, with matching package/plugin/MCP versions and source/artifact hashes.
-Omitted files, stale candidates or changed bytes fail the gate. CI reuses one
-artifact for unit/integration, native-manager, Docker and package checks; the
-release workflow publishes that tested tarball and verifies the registry receipt.
+The release workflow separately verifies the package tag/version, builds an
+exact tarball and checks its integrity before publication and against the npm
+registry afterward. Release preparation does not publish or deploy anything.
 
 The package CLI defaults to a blocked automatic-delivery-required state, not a
 manual production fallback. `psst-antigravity diagnostic --config <private-path>`
@@ -150,8 +142,6 @@ publisher setup and release-driven workflow. No main merge or npm publication is
 performed by preparing this branch.
 
 Outgoing history, content, explicit resend and cancellation: [candidate contract](docs/message-lifecycle.md).
-
-[Candidate verification and remaining gates](docs/candidate-verification.md).
 
 ### Readable received messages
 
@@ -163,4 +153,4 @@ message or guarantee an always-open card. See [format, compatibility and limits]
 
 ## Verification
 
-See [the verification stages](docs/verification.md) for what the shared `verify` job checks and what still needs a real-client pilot.
+See [unit-test scope](docs/verification.md) for the checks performed by `verify`.

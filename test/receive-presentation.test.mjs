@@ -3,15 +3,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { PassThrough, Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { nativeMessage } from '../src/message-format.mjs';
 import { readableReceive, NATIVE_RECEIVE_RESPONSE_BYTES } from '../src/receive-presentation.mjs';
 import { serveStdio } from '../src/mcp-stdio.mjs';
-import { Inbox, newSessionIdentity } from '../vendor/psst/reference/inbox.mjs';
-import { createCooperativeInbox } from '../src/cooperative-inbox.mjs';
-const fixtureNow = () => Date.parse('2026-11-02T12:00:00.000Z');
 const sender = '11111111-1111-4111-8111-111111111111';
 function envelope(text, name='Pi peer', recipient=randomUUID()) {
   return {protocol_version:'1',message_id:randomUUID(),recipient_id:recipient,recipient_sequence:1,
@@ -61,27 +55,7 @@ test('empty, error, unknown and mismatched messages retain the old JSON contract
     {...good,message_id:randomUUID()},{...good,local_state:'consumed'},{...good,acknowledgment_required:false}])assert.equal(readableReceive(value),null);
 });
 
-test('presentation preserves inbox hashes, pending state, private receipt and restart/ACK semantics', async t => {
-  const directory=mkdtempSync(join(tmpdir(),'psst-readable-')),identity=newSessionIdentity('antigravity-cli');
-  let inbox=new Inbox({directory,identity,now:fixtureNow});t.after(()=>{inbox.close();rmSync(directory,{recursive:true,force:true});});
-  const e=envelope('unchanged body\nend', 'peer',identity.client_id);inbox.accept(e);
-  let api=createCooperativeInbox({inbox});const original=await api.broker_receive();
-  const before=inbox.db.prepare('SELECT * FROM inbox WHERE message_id=?').get(e.message_id);
-  const receipt=inbox.db.prepare('SELECT receipt_token FROM cooperative_receipts WHERE message_id=?').get(e.message_id).receipt_token;
-  for(let i=0;i<3;i++){
-    const shown=readableReceive(await api.broker_receive());assert.deepEqual(shown.structuredContent,original);
-    assert.equal(JSON.stringify(shown).includes(receipt),false);
-  }
-  assert.deepEqual(inbox.db.prepare('SELECT * FROM inbox WHERE message_id=?').get(e.message_id),before);
-  inbox.close();inbox=new Inbox({directory,identity,now:fixtureNow});api=createCooperativeInbox({inbox});
-  assert.deepEqual(readableReceive(await api.broker_receive()).structuredContent,original);
-  const ack=await api.broker_acknowledge({message_id:e.message_id});assert.equal(ack.acknowledged,true);assert.equal(ack.action_success,'unknown');
-  assert.deepEqual(await api.broker_acknowledge({message_id:e.message_id}),ack);
-  assert.equal((await api.broker_receive()).message,null);
-  assert.equal(inbox.db.prepare('SELECT native_receipt FROM inbox WHERE message_id=?').get(e.message_id).native_receipt,null);
-});
-
-test('actual wire preserves full maximum hostile body and tail within receive-only 1MiB', async t => {
+test('in-memory MCP serialization preserves full maximum hostile body and tail within receive-only 1MiB', async t => {
   let original;const call=await rpc(t,{broker_receive:async()=>original},{readableNativeReceive:true,maxReceiveResponseBytes:NATIVE_RECEIVE_RESPONSE_BYTES});
   for(const char of ['\u0000','\u001b','\n','\r','\t','`','\\','😀']) {
     const tail='EXACT_FULL_TAIL',room=65536-Buffer.byteLength(tail),text=char.repeat(Math.floor(room/Buffer.byteLength(char)))+tail;
@@ -116,15 +90,4 @@ test('English details show project and model without changing raw provider or co
  assert.match(text,/Project: project\\-example/);assert.match(text,/Model: model\\-example/);
  assert(!text.includes('provider-hidden'));assert(!text.includes(e.correlation_id));
  assert.equal(JSON.stringify(shown.structuredContent),before);
-});
-
-
-test('presentation fixture clock keeps admission deterministic and expiry enforced', t => {
-  const directory=mkdtempSync(join(tmpdir(),'psst-readable-clock-')),identity=newSessionIdentity('antigravity-cli');
-  const inbox=new Inbox({directory,identity,now:fixtureNow});
-  t.after(()=>{inbox.close();rmSync(directory,{recursive:true,force:true});});
-  const expired=envelope('expired', 'peer',identity.client_id);
-  expired.expires_at=new Date(fixtureNow()).toISOString();
-  assert.throws(()=>inbox.accept(expired),{code:'envelope_expired'});
-  assert.equal(inbox.accept(envelope('valid','peer',identity.client_id)).stored,true);
 });

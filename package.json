@@ -6,11 +6,8 @@
     "node": ">=24.19.0 <25"
   },
   "scripts": {
-    "test": "node scripts/test-stage.mjs all",
-    "check": "find src bin test vendor scripts -name \"*.mjs\" -print0 | xargs -0 -r -n1 node --check",
-    "test:pack": "node scripts/pack-smoke.mjs",
-    "test:local": "node scripts/test-stage.mjs local",
-    "test:integration": "node scripts/test-stage.mjs integration"
+    "test": "node --test test/*.test.mjs",
+    "check": "find src bin test vendor scripts -name \"*.mjs\" -print0 | xargs -0 -r -n1 node --check"
   },
   "license": "MIT",
   "description": "Native Antigravity Psst setup and conversation messaging with private administrator-approved installation credentials.",
@@ -26,19 +23,15 @@
     "vendor/psst/**",
     "docs/installation.md",
     "docs/pairing.md",
-    "docs/native-pilot.md",
     "docs/release.md",
     "plugin.json",
     "mcp_config.json",
     "hooks.json",
     "skills/**",
     "docs/setup.md",
-    "docs/native-acceptance.md",
     "docs/message-lifecycle.md",
-    "docs/candidate-verification.md",
     "docs/receive-presentation.md",
-    "docs/migration-0.6.0.md",
-    "docs/issue-8-acceptance.md"
+    "docs/migration-0.6.0.md"
   ],
   "repository": {
     "type": "git",

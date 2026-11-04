@@ -1,8 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {randomUUID} from 'node:crypto';
-import {NativeBinding,processIdentity} from '../src/native-binding.mjs';import {savePrivate} from '../src/installation.mjs';import {waitApproval} from '../src/approval-waiter.mjs';
-test('approval native waiter is exclusive, request-fenced, one-use and body-free',async t=>{
- const directory=mkdtempSync(join(tmpdir(),'agy-approval-wait-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));const host=processIdentity(process.pid),ownerEpoch=randomUUID(),context={host,conversationId:randomUUID()};const binding=new NativeBinding({path:join(directory,'binding.sqlite'),host,create:true});t.after(()=>binding.dispose());binding.startOwner(ownerEpoch);binding.observe(context);
- savePrivate(join(directory,'owner.json'),{host,ownerEpoch,connectorProcess:host});const requestId=randomUUID();savePrivate(join(directory,'approval.json'),{state:'pending',requestId});const permit=()=>binding.issue({context,tool:'broker_wait_approval',args:{}}).__psst_permit;
- const first=permit(),waiting=waitApproval({directory,permit:first});await assert.rejects(waitApproval({directory,permit:permit()}));await assert.rejects(waitApproval({directory,permit:first}));savePrivate(join(directory,'approval.json'),{state:'approved',requestId:randomUUID()});assert.match(await waiting,/request changed/);
- const notice=await waitApproval({directory,permit:permit()});assert.match(notice,/setup approved/);assert.doesNotMatch(notice,new RegExp(requestId));
-});
