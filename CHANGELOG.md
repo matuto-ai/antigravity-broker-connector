@@ -1,5 +1,14 @@
 # 0.6.0 — Unreleased
 
+## Unreleased native lifecycle fixes (issue #8)
+
+- Reconcile uncertain setup POSTs from the saved candidate with GET-only recovery.
+- Retry transient saved-installation startup failures with cooldown and the same
+  authorization/conversation; notify through the existing native status waiter.
+- Keep replacement approval observable while the previous connection works.
+- Reject incomplete runtime files and altered hook/MCP manifests in doctor.
+- Validate through focused unit tests; owner-machine integration is deferred.
+
 - Admit verified native root transitions only through setup-status/connect after the first root, with a fail-closed 256-retirement bound, transport root/self IDs and exact hook permits; drain old work and preserve old journals without replay into the new mailbox. Child IDs and retired roots cannot select the owner.
 - Preserve same-root retention recovery, explicit setup recovery and native permissions. Authenticated `/compact` acceptance remains separate from local fixtures.
 

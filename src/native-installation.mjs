@@ -1,7 +1,26 @@
 import { readFileSync, lstatSync, realpathSync, accessSync, constants } from 'node:fs';
 import { join, isAbsolute, resolve, delimiter } from 'node:path';
 import { homedir } from 'node:os';
+import { isDeepStrictEqual } from 'node:util';
 import { verifyReference } from './reference-pin.mjs';
+
+
+// Native entrypoint's complete local runtime closure. Keep this explicit so an
+// incomplete installed package cannot define its own, smaller completeness check.
+export const NATIVE_RUNTIME_FILES = Object.freeze([
+  'bin/psst-antigravity-native.mjs',
+  ...['approval-manager','approval-waiter','connector-config','cooperative-inbox',
+    'installation','mcp-stdio','message-format','native-binding','native-incarnation',
+    'native-metadata','native-plugin','native-process-waiter','native-root-context',
+    'native-session','native-waiter','pairing','presence-notices','project-metadata',
+    'receive-presentation','runtime-info','tool-scope'].map(name => `src/${name}.mjs`),
+  'vendor/psst/approval.mjs', 'vendor/psst/enrollment.mjs',
+]);
+const EXPECTED_HOOKS = { 'psst-native-binding': {
+  SessionStart: [{ type: 'command', command: 'node ./bin/psst-antigravity-native.mjs hook observe', timeout: 5 }],
+  PreInvocation: [{ type: 'command', command: 'node ./bin/psst-antigravity-native.mjs hook observe', timeout: 5 }],
+  PreToolUse: [{ matcher: 'call_mcp_tool|run_command', hooks: [{ type: 'command', command: 'node ./bin/psst-antigravity-native.mjs hook', timeout: 5 }] }],
+} };
 
 export function supportedNativeRuntime(platform = process.platform, version = process.versions.node) {
   const [major, minor, patch] = version.split('.').map(Number);
@@ -28,13 +47,13 @@ function inspectPackage(path, { platform = process.platform, version = process.v
   catch { throw Error('plugin_source_directory_not_found'); }
   try { regularFile(root, 'plugin.json'); } catch { throw Error('plugin_root_manifest_missing'); }
   try {
-    for (const file of ['package.json','mcp_config.json','hooks.json','bin/psst-antigravity-native.mjs','skills/psst-setup/SKILL.md','skills/psst/SKILL.md']) regularFile(root, file);
+    for (const file of ['package.json','mcp_config.json','hooks.json','skills/psst-setup/SKILL.md','skills/psst/SKILL.md',...NATIVE_RUNTIME_FILES]) regularFile(root, file);
     const manifest = JSON.parse(readFileSync(join(root, 'plugin.json'), 'utf8'));
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     const mcp = JSON.parse(readFileSync(join(root, 'mcp_config.json'), 'utf8'));
     if (manifest.name !== 'psst-native' || pkg.name !== '@matuto-ai/antigravity-psst-connector' || manifest.version !== pkg.version || typeof pkg.version !== 'string') throw Error();
-    if (mcp?.mcpServers?.psst?.command !== 'node' || JSON.stringify(mcp.mcpServers.psst.args) !== JSON.stringify(['./bin/psst-antigravity-native.mjs','serve','--experimental-native'])) throw Error();
-    JSON.parse(readFileSync(join(root, 'hooks.json'), 'utf8'));
+    if (!isDeepStrictEqual(mcp, { mcpServers: { psst: { command: 'node', args: ['./bin/psst-antigravity-native.mjs','serve','--experimental-native'] } } })) throw Error();
+    if (!isDeepStrictEqual(JSON.parse(readFileSync(join(root, 'hooks.json'), 'utf8')), EXPECTED_HOOKS)) throw Error();
     verifyReference(join(root, 'vendor', 'psst'));
     return {
       package_version: pkg.version, plugin_name: manifest.name, plugin_directory: root,

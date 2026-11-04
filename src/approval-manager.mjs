@@ -22,8 +22,9 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
    catch(error){if(!selected){try{await staged?.rollback?.();}finally{await candidate.close();}}throw error;}
   }
  }
- async function loop(p,epoch,initial,pendingDeadline){
+ async function loop(p,epoch,initial,pendingDeadline,initialPauseMs=0){
   let result=initial,failures=0,expiresAt=pendingDeadline??(initial?.state==='pending'?initial.requestExpiresAt:undefined);
+  if(initialPauseMs){try{await sleep(initialPauseMs,undefined,{signal:controller.signal});}catch{return;}}
   while(current(epoch,p)){
    if(expiresAt&&Date.parse(expiresAt)<=Date.now()){publish({state:'expired',requestId:p.requestId,requestExpiresAt:expiresAt});installation.cancel({state:'expired',requestId:p.requestId,requestExpiresAt:expiresAt});return;}
    try{
@@ -39,7 +40,7 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
    }
   }
  }
- function launch(p,result,pendingDeadline){if(!alive())return status;controller?.abort();controller=new AbortController();const epoch=++generation;const task=loop(p,epoch,result,pendingDeadline);tasks.add(task);task.then(()=>tasks.delete(task),()=>tasks.delete(task));return status;}
+ function launch(p,result,pendingDeadline,initialPauseMs=0){if(!alive())return status;controller?.abort();controller=new AbortController();const epoch=++generation;const task=loop(p,epoch,result,pendingDeadline,initialPauseMs);tasks.add(task);task.then(()=>tasks.delete(task),()=>tasks.delete(task));return status;}
  return {get status(){return status;},get done(){return Promise.allSettled([...tasks]);},
   async begin(brokerUrl){
    if(!alive())throw Error('approval_manager_closed');
@@ -53,9 +54,20 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
     if(prior&&!prior.cancelled&&prior.brokerUrl!==brokerUrl)throw Error('cancel_pending_setup_first');
     const p=installation.beginPending({brokerUrl,previousRevision:old?.revision??null});
     controller?.abort();controller=new AbortController();const epoch=++generation;
-    const result=await api.beginApproval({...options(p),...(replacing?{replaceRequestId:existing.requestId}:{})});
+    let result,retryPause=0;
+    try{result=await api.beginApproval({...options(p),...(replacing?{replaceRequestId:existing.requestId}:{})});}
+    catch(error){
+     // The helper saves the exact candidate before POST. Reconcile an uncertain
+     // transport result from that local state, then GET only. Never replace a key
+     // or repeat enrollment as a background recovery action.
+     if(!error.retryable||epoch!==generation||!alive())throw error;
+     result=await api.readApprovalState(options(p));
+     if(!result||(p.requestId!==null&&result.requestId!==p.requestId)
+       ||(replacing&&result.requestId===existing.requestId))throw error;
+     retryPause=Math.max(pollMs,Math.min(300000,Number.isFinite(error.retryAfterMs)?error.retryAfterMs:pollMs));
+    }
     if(epoch!==generation||!alive()||installation.pending()?.cancelled)return status;
-    const saved=installation.beginPending({...p,requestId:result.requestId});publish(result.state==='approved'?{...result,state:'pending'}:result);launch(saved,result);return status;
+    const saved=installation.beginPending({...p,requestId:result.requestId});publish(result.state==='approved'?{...result,state:'pending'}:result);launch(saved,retryPause?null:result,result.requestExpiresAt,retryPause);return status;
    }finally{busy=false;}
   },
   async resume(){
@@ -69,6 +81,7 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
   },
   attention(){return publish({state:'attention_required',requestId:status.requestId});},
   adopt(selected){return publish({state:'approved',requestId:selected.requestId});},
+  reconnect(selected){return publish({state:'reconnecting',requestId:selected.requestId});},
   cancel(){if(closed)return status;generation++;controller?.abort();return publish({state:'cancelled',requestId:status.requestId});},
   close(){if(closed)return;closed=true;generation++;controller?.abort();},
  };

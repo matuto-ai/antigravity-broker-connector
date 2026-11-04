@@ -130,3 +130,43 @@ test('terminal replacement reason survives restart without discarding working au
  const reopened=createApprovalManager({installation:f.installation,api:{},activate:{}});reopened.adopt(selected);await reopened.resume();
  assert.deepEqual(reopened.status,{state:'denied',requestId});assert.equal(f.installation.selected().revision,selected.revision);assert.equal(f.installation.selected().credentialId,first.credentialId);reopened.close();
 });
+
+
+test('uncertain setup POST resumes the saved request in the same host with GET only', async t => {
+ const f=fixture(t),r=approved(f);let reads=0,posts=0,polls=0;const waits=[];
+ const manager=createApprovalManager({installation:f.installation,
+  api:{readApprovalState:()=>++reads===1?null:{state:'pending',requestId:r.requestId},
+   beginApproval:()=>{posts++;throw Object.assign(Error('transport'),{retryable:true,effect:'unknown',retryAfterMs:60000});},
+   pollApproval:()=>{polls++;return r;}},
+  activate:{prepare:async()=>({close:async()=>{}}),commit:async()=>{}},sleep:async ms=>{waits.push(ms);}});
+ const status=await manager.begin('https://broker.example');await manager.done;
+ assert.equal(status.requestId,r.requestId);assert.equal(posts,1);assert.equal(polls,1);
+ assert.deepEqual(waits,[60000]);assert.equal(f.installation.selected().requestId,r.requestId);
+ manager.close();
+});
+
+test('uncertain setup recovery never adopts the old request or invents an absent candidate', async t => {
+ for(const replacement of [false,true]){
+  const f=fixture(t),first=approved(f);let posts=0,polls=0;
+  if(replacement){f.installation.beginPending({brokerUrl:'https://broker.example',requestId:first.requestId,previousRevision:null});f.installation.commit({...first,previousRevision:null});}
+  const manager=createApprovalManager({installation:f.installation,
+   api:{readApprovalState:()=>replacement?first:null,
+    beginApproval:()=>{posts++;throw Object.assign(Error('busy'),{retryable:true,effect:'not_applied'});},
+    pollApproval:()=>{polls++;throw Error('no exact candidate');}},activate:{}});
+  await assert.rejects(manager.begin('https://broker.example'),/busy/);await manager.done;
+  assert.equal(posts,1);assert.equal(polls,0);
+  assert.equal(f.installation.selected()?.requestId??null,replacement?first.requestId:null);
+  manager.close();
+ }
+});
+
+test('cancel during same-host transport recovery fences GET and late selection', async t => {
+ const f=fixture(t),r=approved(f),sleeping=barrier(),wait=barrier();let reads=0,polls=0;
+ const manager=createApprovalManager({installation:f.installation,
+  api:{readApprovalState:()=>++reads===1?null:{state:'pending',requestId:r.requestId},
+   beginApproval:()=>{throw Object.assign(Error('transport'),{retryable:true,effect:'unknown'});},
+   pollApproval:()=>{polls++;return r;}},activate:{},sleep:async()=>{sleeping.resolve();await wait.promise;}});
+ await manager.begin('https://broker.example');await sleeping.promise;manager.cancel();wait.resolve();await manager.done;
+ assert.equal(polls,0);assert.equal(f.installation.selected(),null);
+ assert.equal(f.installation.pending().requestId,r.requestId);assert.equal(manager.status.state,'cancelled');manager.close();
+});
