@@ -28,5 +28,6 @@ integration test.
 
 Unit tests do not certify an installed Antigravity host, permission UI or live
 message delivery. Runtime support and permission limits remain documented in
-[setup](setup.md). Packaging and registry integrity verification stay confined
-to the release workflow; they are not another test suite or regular CI gate.
+[setup](setup.md). Packaging and pre-publication artifact integrity verification
+stay confined to the release workflow; they are not another test suite or regular
+CI gate. The owner confirms registry publication manually after npm publish.
