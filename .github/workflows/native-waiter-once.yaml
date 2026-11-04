@@ -1,0 +1,30 @@
+name: One-shot isolated native waiter
+on:
+  push:
+    branches: ['feat/complete-native-qualification']
+permissions:
+  contents: read
+jobs:
+  native_waiter_once:
+    # The single branch transition approved on 2026-11-04. Not PR events,
+    # future pushes, manual runs or reruns. The worker spends at most one Enter.
+    if: github.repository == 'matuto-ai/antigravity-psst-connector' && github.event_name == 'push' && github.ref == 'refs/heads/feat/complete-native-qualification' && github.event.before == '3bf54ee24703bb38ac1764184e17d50615c67c23' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: antigravity-review-pair
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: matuto-ai/psst
+          ref: f32ddc79ec7b812062ed3f6de7b9a0c12a7128f3
+          path: ai-agent-msg-broker
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.19.0'
+      - name: Run the single authorized isolated waiter test
+        run: bash scripts/native-contract-proof/run-actual.sh "$PWD" authorized-once
+        working-directory: antigravity-review-pair

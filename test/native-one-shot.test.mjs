@@ -1,0 +1,18 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import {readFileSync} from 'node:fs';
+test('one-shot run cannot repeat through normal CI, PR duplicates, later pushes or reruns',()=>{
+ const workflow=readFileSync(new URL('../.github/workflows/native-waiter-once.yaml',import.meta.url),'utf8');
+ assert.match(workflow,/github\.event_name == 'push'/);
+ assert.match(workflow,/github\.event\.before == '3bf54ee24703bb38ac1764184e17d50615c67c23'/);
+ assert.match(workflow,/github\.ref == 'refs\/heads\/feat\/complete-native-qualification'/);
+ assert.match(workflow,/github\.run_attempt == 1/);
+ assert.doesNotMatch(workflow,/pull_request:|workflow_dispatch:|schedule:|continue-on-error/);
+ const normal=readFileSync(new URL('../.github/workflows/verify.yaml',import.meta.url),'utf8');
+ assert.doesNotMatch(normal,/authorized-once|confirm-waiter-once/);
+ const runner=readFileSync(new URL('../scripts/native-contract-proof/run-actual.sh',import.meta.url),'utf8');
+ assert.match(runner,/authorized-once\) modes=\(idle\); extra_args=\(--confirm-waiter-once\);;/);
+ const fixture=readFileSync(new URL('../scripts/native-contract-proof/actual-plugin-fixture.mjs',import.meta.url),'utf8');
+ assert.doesNotMatch(fixture,/command\('/);
+});

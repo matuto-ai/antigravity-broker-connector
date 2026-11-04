@@ -2,7 +2,7 @@
 import {prepareActualPluginFixture} from './actual-plugin-fixture.mjs';
 import {actualCompactContinuity,actualRootRotation,matchingIdleStop} from './actual-compact-state.mjs';
 import {presenceProviderStep} from './presence-provider-step.mjs';
-import {pendingNativeCommandPermission} from './permission-state.mjs';
+import {pendingNativeCommandPermission,exactWaiterPermission} from './permission-state.mjs';
 import {setupProviderStep} from './setup-provider-step.mjs';
 import {waiterProviderStep} from './waiter-provider-step.mjs';
 import {messageProviderStep,MESSAGE_TOOLS} from './message-provider-step.mjs';
@@ -12,6 +12,8 @@ import {trustState} from './trust-state.mjs';
 import {TerminalScreen} from './xterm-screen.mjs';
 import {consentState,postConsentState,consentNavigation,navigationRenderState} from './consent-state-navigation.mjs';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {processIdentity} from '/plugin/src/native-binding.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {networkInterfaces} from 'node:os';
 import {readFileSync,writeFileSync,mkdirSync,existsSync,lstatSync,realpathSync,readdirSync} from 'node:fs';
@@ -31,6 +33,9 @@ const events=fixture.eventsFile;
 writeFileSync(home+'/.gemini/config/hooks.json',JSON.stringify(fixture.hooks));
 writeFileSync(home+'/.gemini/config/mcp_config.json',JSON.stringify(fixture.mcp));
 let turn={sent:0,completed:0},presenceState={sent:0,completed:0},presenceProof=null,messageState={sent:0,completed:0},messageProof=null,messageBoundaries=[],providerFailure=null,providerDiagnostics=null;const requests=[],identities=[],snapshots=[];
+const oneShotAuthorized=process.argv[3]==='--confirm-waiter-once';
+assert(!oneShotAuthorized||mode==='idle','one-shot authorization is scoped to one idle fixture only');
+let permissionConfirmations=0,permissionVersion=-1,permissionSentAt=0,permissionDismissed=false,permissionDiagnostics=null;
 let nativePermissionBlocked=false;
 let busyInjection=false,providerActive=0,providerMaxActive=0;
 let setupState={sent:0,completed:0},approvalWaiterState={sent:0,completed:0},approvalGranted=false;
@@ -105,13 +110,54 @@ writeFileSync(home+'/.gemini/antigravity-cli/settings.json',JSON.stringify({perm
 const setupPrompt=`Set up Psst using only ${fixture.brokerUrl}. Arm the approval waiter and end the turn. Continue only on native completion, then identify, arm inbox waiter and handle the disposable incoming message fixture.`;
 const idlePrompt='Read broker_setup_status then broker_identity, arm its waiter_command with run_command WaitMsBeforeAsync=500 and end the turn. For an automatic Psst notice, run the exact disposable message fixture and re-arm. Do not run other commands.';
 const messagePrompt='Use call_mcp_tool for broker_setup_status and broker_identity, then the exact disposable message fixture: broker_send once, broker_receive twice, broker_acknowledge twice for that received ID, and broker_receive to verify empty. Do not run commands or other tools.';
-const nativeArgs=['--model','fixture','--print',mode==='messages'?messagePrompt:'Read broker_setup_status then broker_identity using call_mcp_tool, then stop. Do not run commands or other tools.','--output-format','json','--print-timeout','20s'];const child=spawn(interactive?'script':'/native/antigravity',interactive?['-q','-e','-c',`stty cols 120 rows 40; /native/antigravity --model fixture --prompt-interactive '${mode==='setup'?setupPrompt:['idle','busy'].includes(mode)?idlePrompt:'Read broker_setup_status then broker_identity using call_mcp_tool, then stop. Do not run commands or other tools.'}'`,'/dev/null']:nativeArgs,{cwd:root,env:{HOME:home,PATH:'/usr/local/bin:/usr/bin:/bin',TMPDIR:'/tmp',GEMINI_API_KEY:'offline-fixture-only',GOOGLE_GEMINI_BASE_URL:url,TERM:'xterm-256color'},stdio:[interactive?'pipe':'ignore','pipe','pipe']});const screen=new TerminalScreen(120,40);let lastScreenChange=Date.now(),previousScreen='';let outBytes=0,err='',overflow=false,timedOut=false,parserFailed=false;child.stdout.on('data',b=>{lastScreenChange=Date.now();outBytes+=b.length;if(outBytes>(['idle','setup','busy'].includes(mode)?262144:65536)){overflow=true;child.kill('SIGKILL');return;}try{screen.write(b).catch(error=>{parserFailed=true;err+='terminal_parser_failed:'+error.message;child.kill('SIGKILL');});}catch(error){parserFailed=true;err+='terminal_parser_failed:'+error.message;child.kill('SIGKILL');return;}const current=screen.text();if(current!==previousScreen)previousScreen=current;});child.stderr.on('data',b=>{lastScreenChange=Date.now();err+=b;if(err.length>65536){overflow=true;child.kill('SIGKILL');}});let collectionToggleSent=false,collectionUnchecked=false,termsAccepted=false,termsAcceptanceSent=false,consentBlocked=false,acceptScreenVersion=0;const consentEvidence=[];let trustConfirmationSent=false,trustPromptDismissed=false,trustScreenVersion=-1,trustSentAt=0;let navigationSteps=0,navigationFocus=null,navigationVersion=-1,navigationSentAt=0;let themeSelected=false,compactIssued=false,probeIssued=false,stoppedAfterCompact=false;let commandVersion=-1,probeHookStart=-1;const compactTimers=[];
+const columns=oneShotAuthorized?360:120,rows=oneShotAuthorized?60:40;
+const nativeArgs=['--model','fixture','--print',mode==='messages'?messagePrompt:'Read broker_setup_status then broker_identity using call_mcp_tool, then stop. Do not run commands or other tools.','--output-format','json','--print-timeout','20s'];const child=spawn(interactive?'script':'/native/antigravity',interactive?['-q','-e','-c',`stty cols ${columns} rows ${rows}; /native/antigravity --model fixture --prompt-interactive '${mode==='setup'?setupPrompt:['idle','busy'].includes(mode)?idlePrompt:'Read broker_setup_status then broker_identity using call_mcp_tool, then stop. Do not run commands or other tools.'}'`,'/dev/null']:nativeArgs,{cwd:root,env:{HOME:home,PATH:'/usr/local/bin:/usr/bin:/bin',TMPDIR:'/tmp',GEMINI_API_KEY:'offline-fixture-only',GOOGLE_GEMINI_BASE_URL:url,TERM:'xterm-256color'},stdio:[interactive?'pipe':'ignore','pipe','pipe']});const screen=new TerminalScreen(columns,rows);let lastScreenChange=Date.now(),previousScreen='';let outBytes=0,err='',overflow=false,timedOut=false,parserFailed=false;child.stdout.on('data',b=>{lastScreenChange=Date.now();outBytes+=b.length;if(outBytes>(['idle','setup','busy'].includes(mode)?262144:65536)){overflow=true;child.kill('SIGKILL');return;}try{screen.write(b).catch(error=>{parserFailed=true;err+='terminal_parser_failed:'+error.message;child.kill('SIGKILL');});}catch(error){parserFailed=true;err+='terminal_parser_failed:'+error.message;child.kill('SIGKILL');return;}const current=screen.text();if(current!==previousScreen)previousScreen=current;});child.stderr.on('data',b=>{lastScreenChange=Date.now();err+=b;if(err.length>65536){overflow=true;child.kill('SIGKILL');}});let collectionToggleSent=false,collectionUnchecked=false,termsAccepted=false,termsAcceptanceSent=false,consentBlocked=false,acceptScreenVersion=0;const consentEvidence=[];let trustConfirmationSent=false,trustPromptDismissed=false,trustScreenVersion=-1,trustSentAt=0;let navigationSteps=0,navigationFocus=null,navigationVersion=-1,navigationSentAt=0;let themeSelected=false,compactIssued=false,probeIssued=false,stoppedAfterCompact=false;let commandVersion=-1,probeHookStart=-1;const compactTimers=[];
 function activeWaiters(subcommand='wait'){let count=0;for(const pid of readdirSync('/proc').filter(n=>/^[0-9]+$/.test(n))){try{const args=readFileSync('/proc/'+pid+'/cmdline','utf8').split('\0');if(args[1]==='/plugin/bin/psst-antigravity-native.mjs'&&args[2]===subcommand)count++;}catch{}}return count;}
+// Reconstruct only the exact command issued by the real native PreToolUse hook.
+// Tokens remain in memory and the existing private binding DB, never proof logs.
+function verifiedPermissionCommand(){
+ assert(oneShotAuthorized&&mode==='idle'&&permissionConfirmations===0);
+ const history=fixture.readEvents().filter(h=>h.event==='PreToolUse'&&h.toolName==='run_command');
+ assert.equal(history.length,1);assert.equal(history[0].denied,false);
+ assert.equal(identities.length,1);assert.equal(snapshots.length,1);
+ const snap=snapshot(identities[0]);assert.deepEqual(snap,snapshots[0]);
+ assert.deepEqual(processIdentity(snap.host.pid),snap.host);
+ assert.deepEqual(processIdentity(snap.connectorProcess.pid),snap.connectorProcess);
+ assert.equal(snap.host.executable,'/native/antigravity');
+ assert.equal(history[0].hostPid,snap.host.pid);assert.equal(history[0].hostStart,snap.host.start);
+ assert.equal(history[0].conversationId,snap.conversationId);
+ assert.equal(history[0].environmentConversationId,snap.conversationId);
+ const directory=`${home}/.config/psst/antigravity/native/${snap.host.pid}-${snap.host.start}-${snap.host.boot}`;
+ assert.equal(realpathSync(directory),directory);
+ const original=`'/usr/local/bin/node' '/plugin/bin/psst-antigravity-native.mjs' wait '${directory}'`;
+ assert.equal(turn.waiterCommand,original);assert.equal(waiterState.sent,1);assert.equal(waiterState.completed,0);
+ const db=new DatabaseSync(directory+'/binding.sqlite',{readOnly:true});let permits;
+ try{permits=db.prepare('SELECT * FROM permits').all();}finally{db.close();}
+ assert.equal(permits.length,1);const permit=permits[0];
+ assert.equal(permit.tool,'broker_wait');assert.equal(permit.conversation,snap.conversationId);
+ assert.equal(permit.digest,createHash('sha256').update('{}').digest('hex'));
+ assert(permit.expires>Date.now()+1000);assert(/^[0-9a-f-]{36}$/.test(permit.token));
+ const command=original+` '${permit.token}'`;
+ assert.equal(createHash('sha256').update(command).digest('hex'),history[0].commandDigest);
+ assert.equal(activeWaiters()+activeWaiters('wait-approval'),0);
+ return command;
+}
 const compactPoll=interactive?setInterval(()=>{
  const current=screen.text();if(parserFailed||overflow||timedOut||!screen.complete||Date.now()-Math.max(lastScreenChange,screen.lastParsedAt)<250)return;
  if(['idle','setup','busy'].includes(mode)&&pendingNativeCommandPermission(current,{trustSent:trustConfirmationSent,commandObserved:fixture.readEvents().some(h=>h.event==='PreToolUse'&&h.toolName==='run_command')})){
+  if(oneShotAuthorized&&permissionConfirmations===0){
+   try{
+    const command=verifiedPermissionCommand();permissionDiagnostics=exactWaiterPermission(current,{expectedCommand:command});
+    if(permissionDiagnostics.recognized){
+     // Spend before input. There is no retry on an unchanged or uncertain screen.
+     permissionConfirmations=1;permissionVersion=screen.version;permissionSentAt=Date.now();
+     consentEvidence.push({action:'confirm_exact_fixture_waiter_once',screen:current});child.stdin.write('\r');return;
+    }
+   }catch{permissionDiagnostics={provenanceVerified:false};}
+  }else if(permissionConfirmations===1&&!permissionDismissed&&screen.version===permissionVersion&&Date.now()-permissionSentAt<1000){return;}
   nativePermissionBlocked=true;timeoutWaiters={inbox:activeWaiters(),approval:activeWaiters('wait-approval')};consentEvidence.push({action:'stop_pending_native_command_permission',screen:current});clearInterval(compactPoll);child.kill('SIGTERM');return;
  }
+ if(permissionConfirmations===1&&screen.version>permissionVersion)permissionDismissed=true;
  if(!themeSelected&&current.includes('Choose your color scheme:')&&/^\s*> terminal(?:\s|$)/m.test(current)){themeSelected=true;child.stdin.write('\r');return;}
  const consent=consentState(current);
  if(termsAcceptanceSent&&!termsAccepted){if(screen.version>acceptScreenVersion&&!consent.terms)termsAccepted=true;else return;}
@@ -181,12 +227,14 @@ const actualVerified=messagesVerified&&presenceVerified&&!providerFailure&&ident
 const compactVerified=!['compact','new'].includes(mode)||compactIssued&&probeIssued&&stoppedAfterCompact&&(mode==='new'?actualRootRotation(identities,snapshots):actualCompactContinuity(identities,snapshots));
 const wakeupVerified=!['idle','setup','busy'].includes(mode)||idleSeeded&&(mode==='busy'?busyInjection&&providerMaxActive===1:idleStopped)&&rearmStopped&&waiterState.completed===1&&rearmState.completed===1&&waiterProcesses.length===(mode==='busy'?1:2)&&waiterProcesses.every(n=>n===1);
 const setupVerified=mode!=='setup'||approvalGranted&&setupState.completed===2&&approvalWaiterState.completed===1&&fixture.enrollmentPostCount===1;
-const uiWords=new Set('Do you want to run execute this command Command Run Execute Allow allow Deny deny Yes yes No no always Always once Once session Session workspace Workspace permission Permission approve Approve approval required Required modified hook Hook arguments Arguments changed Changed Continue continue Cancel cancel Escape Esc enter Enter confirm Confirm accept Accept reject Reject Remember remember for the this and or to from in of by with is a an please Please press Press choose Choose select Select trust Trust background Background running Running tool Tool Native Psst fixture waiter wait psst native psst-antigravity-native'.split(' '));
+const uiWords=new Set('Do you want to run execute this command Command Run Execute Allow allow Deny deny Yes yes No no always Always once Once session Session workspace Workspace permission Permission approve Approve approval required Required modified hook Hook arguments Arguments changed Changed Continue continue Cancel cancel Escape Esc enter Enter confirm Confirm accept Accept reject Reject Remember remember for the this and or to from in of by with is a an commands that start Persist settings json conversation Navigate ctrl esc edit please Please press Press choose Choose select Select trust Trust background Background running Running tool Tool Native Psst fixture waiter wait psst native psst-antigravity-native'.split(' '));
 const projectedUi=value=>value.split('\n').map(line=>(line.match(/[A-Za-z][A-Za-z-]*|[^A-Za-z]+/g)??[]).map(token=>uiWords.has(token)?token:/^\s+$/.test(token)?' ':/^[>\[\]().:?]+$/.test(token)?token:'?').join('').replace(/ +/g,' ').trim()).filter(Boolean).slice(-18);
 const safeScreen=value=>({rows:value.split('\n').length,composerReady:composerState(value).ready,permissionPrompt:/Allow this|permission required|Approve|command denied|not allowed|Run this command\?/i.test(value),fixtureFailure:value.includes('OFFLINE_ACTUAL_PROOF_FAILED'),waiterMention:value.includes('psst-antigravity-native'),proofComplete:value.includes('OFFLINE_NATIVE_MESSAGE_CONTEXT_VERIFIED'),ui:projectedUi(value)});
-const qualified=actualVerified&&compactVerified&&setupVerified&&wakeupVerified&&shutdownVerified&&!nativePermissionBlocked&&!parserFailed&&!timedOut&&!overflow&&[0,130].includes(code)&&(!interactive||collectionUnchecked&&termsAccepted&&!consentBlocked);
-console.log(JSON.stringify({mode,nativePermissionBlocked,blockedAction:nativePermissionBlocked?(mode==='setup'?'execute_disposable_approval_waiter_once':'execute_disposable_inbox_waiter_once'):null,timeoutWaiters,shutdownVerified,busyInjection,providerMaxActive,setupVerified,enrollmentPostCount:fixture.enrollmentPostCount,wakeupVerified,idleSeeded,idleStopped,rearmStopped,waiterProcesses,messagesVerified,messageBoundaries,presenceVerified,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence:consentEvidence.map(event=>({...event,...(event.screen?{screen:safeScreen(event.screen)}:{})})),terminalScreen:safeScreen(screen.text()),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:{bytes:Buffer.byteLength(err),parserFailure:err.includes('terminal_parser_failed'),permissionDenied:/permission|denied/i.test(err)},acceptance:qualified?(mode==='setup'?'actual_plugin_native_setup_wakeup_verified':mode==='busy'?'actual_plugin_native_busy_wakeup_verified':mode==='idle'?'actual_plugin_native_idle_wakeup_verified':mode==='messages'?'actual_plugin_native_message_context_verified':'actual_plugin_native_identity_verified'):'actual_plugin_native_qualification_unverified'}));
-assert(!nativePermissionBlocked,'native_permission_confirmation_required: exact disposable waiter was not executed; no approval or policy override was applied');
+const permissionsUnchanged=JSON.stringify(JSON.parse(readFileSync(home+'/.gemini/antigravity-cli/settings.json','utf8')).permissions)===JSON.stringify(fixture.permissions);
+const qualified=permissionsUnchanged&&actualVerified&&compactVerified&&setupVerified&&wakeupVerified&&shutdownVerified&&!nativePermissionBlocked&&!parserFailed&&!timedOut&&!overflow&&[0,130].includes(code)&&(!interactive||collectionUnchecked&&termsAccepted&&!consentBlocked);
+console.log(JSON.stringify({mode,permissionConfirmations,permissionsUnchanged,permissionDiagnostics,nativePermissionBlocked,blockedAction:nativePermissionBlocked?(mode==='setup'?'execute_disposable_approval_waiter_once':'execute_disposable_inbox_waiter_once'):null,timeoutWaiters,shutdownVerified,busyInjection,providerMaxActive,setupVerified,enrollmentPostCount:fixture.enrollmentPostCount,wakeupVerified,idleSeeded,idleStopped,rearmStopped,waiterProcesses,messagesVerified,messageBoundaries,presenceVerified,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence:consentEvidence.map(event=>({...event,...(event.screen?{screen:safeScreen(event.screen)}:{})})),terminalScreen:safeScreen(screen.text()),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:{bytes:Buffer.byteLength(err),parserFailure:err.includes('terminal_parser_failed'),permissionDenied:/permission|denied/i.test(err)},acceptance:qualified?(mode==='setup'?'actual_plugin_native_setup_wakeup_verified':mode==='busy'?'actual_plugin_native_busy_wakeup_verified':mode==='idle'?'actual_plugin_native_idle_wakeup_verified':mode==='messages'?'actual_plugin_native_message_context_verified':'actual_plugin_native_identity_verified'):'actual_plugin_native_qualification_unverified'}));
+assert(permissionsUnchanged,'native fixture permission settings changed');
+assert(!nativePermissionBlocked,'native_permission_confirmation_required: no additional approval or policy override was applied');
 assert(!parserFailed&&!timedOut&&!overflow,'native fixture diagnostics failed');
 assert([0,130].includes(code),'native fixture exit');
 assert(actualVerified,'actual plugin native identity unverified; no permission bypass');

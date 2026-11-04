@@ -8,3 +8,20 @@ test('actual native command permission is a stop boundary, never implicit approv
  assert.equal(pending('The text says Run this command? but is not a prompt',{trustSent:true,commandObserved:true}),false);
  assert.equal(pending('Run this command?\n'+'x'.repeat(8192),{trustSent:true,commandObserved:true}),false);
 });
+
+import {exactWaiterPermission} from './permission-state.mjs';
+const expected="'/usr/local/bin/node' '/plugin/bin/psst-antigravity-native.mjs' wait '/tmp/proof-home/.config/psst/antigravity/native/18-13757-5a9f1062-b0ab-4fb9-9a61-72f21db5ee2b' '1ae19951-b8c9-436b-9c05-f1d5a196d6f0'";
+const modal=command=>`Command\nRequesting permission for:\n${command}\nRun this command?\n> Yes, run command\nYes, and always allow in this conversation for commands that start with '/usr/local/bin/node /plugin/bin/psst-antigravity-native.mjs wait'\nYes, and always allow for commands that start with '/usr/local/bin/node /plugin/bin/psst-antigravity-native.mjs wait' (Persist to settings.json)\nNo, cancel\n↑/↓ Navigate · enter Confirm`;
+test('only exact rendered disposable inbox waiter with one-shot control focused is recognized',()=>{
+ assert.equal(exactWaiterPermission(modal(expected),{expectedCommand:expected}).recognized,true);
+ assert.equal(exactWaiterPermission(modal(expected.replaceAll("'",'')),{expectedCommand:expected}).recognized,true);
+ assert.equal(exactWaiterPermission(modal(expected.replace(" wait "," wait\n")),{expectedCommand:expected}).recognized,true);
+ for(const changed of [expected+'; true',expected+' &',expected.replace(' wait ',' wait-approval '),expected.replace('/plugin/','/other/'),expected.replace('18-13757','19-13757'),expected.replace('1ae19951','2ae19951'),expected.slice(0,-10)+'...']) {
+  assert.equal(exactWaiterPermission(modal(changed),{expectedCommand:expected}).recognized,false);
+ }
+ for(const changed of [modal(expected).replace('> Yes, run command','Yes, run command').replace('Yes, and always allow in','> Yes, and always allow in'),modal(expected).replace('No, cancel','> No, cancel'),modal(expected)+'\nRun this command?',modal(expected)+'\nRemember this choice: [x]',modal(expected).replace('No, cancel','[x] Remember this choice\nNo, cancel'),modal(expected).replace('Persist to settings.json','Persist to unknown.json'),modal(expected).replace('Requesting permission for:','Possible command:'),'\x1b[0m'+modal(expected),modal(expected)+'x'.repeat(16384)]) {
+  assert.equal(exactWaiterPermission(changed,{expectedCommand:expected}).recognized,false);
+ }
+ assert.equal(exactWaiterPermission(modal(expected)).recognized,false);
+ assert.equal(exactWaiterPermission(modal(expected+'; true'),{expectedCommand:expected+'; true'}).recognized,false);
+});
