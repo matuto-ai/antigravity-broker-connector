@@ -138,7 +138,7 @@ its binding and journal; stale owner epochs and permits remain invalid.
 Hooks record bounded per-conversation model/project observations but cannot switch
 routing. No reliable ConversationClosed/SessionEnd event was established; deleting
 a conversation alone remains a cleanup acceptance gate. Real authenticated
-`/compact` continuity is not certified by the synthetic transport and HTTP tests.
+`/compact` continuity is not certified by the connector unit tests.
 
 The background command waiter uses supported native completion notifications;
 it does not scrape terminals, simulate keys, force permission approval or run a
@@ -206,36 +206,3 @@ Creating a strict binding handle or observing native hooks does not by itself
 disable the legacy loader. Only a verified strict transport admission commits
 `strict_admission_required`; subsequent legacy operations, including already-open
 handles, then fail closed. Waiter consumption cannot activate this marker.
-
-
-## Isolated native qualification — 2026-11-03
-
-[Verify run 41557793494](https://github.com/matuto-ai/antigravity-broker-connector/actions/runs/41557793494)
-passed at `ee81b5b383fae84f9faf943ccbd8979cb61f2bc1`, including container
-persistence and the installable package. The pinned official CLI **1.4.7** ran
-with a fresh HOME, no external network, a synthetic loopback model provider and
-no user account or files. Optional collection stayed unchecked; only the exact
-disposable `/tmp/proof` workspace was trusted.
-
-Two separate suites establish different facts:
-
-- Native hook/transport metadata: actual root, child and lazy MCP calls; actual
-  interactive `/compact` and `/new`, with matching idle Stop events and clean
-  `/exit`. No synthetic root replacement was used for these observations.
-- Actual production connector plus an ephemeral TLS Psst: only
-  `broker_setup_status` and `broker_identity`, through native `call_mcp_tool`.
-  Responses are strictly correlated to the requested tool and decoded from the
-  observed native hook-notice envelope. `/compact` preserves the conversation,
-  client, journal and generation in this pinned CLI. `/new` changes conversation,
-  client and journal and increments generation once, retaining the same host and
-  MCP owner. Read-only database assertions supplement—not replace—tool responses.
-
-Reproduce with `bash scripts/native-contract-proof/run.sh` and
-`bash scripts/native-contract-proof/run-actual.sh`; the latter requires the
-workflow's exact disposable Psst checkout. Recorded sanitized observations are
-in `scripts/native-contract-proof/recorded-native-acceptance.json`.
-
-This is **not** proof of authenticated vendor-model behavior, the user's installed
-version, or unattended message wakeup. Actual send/receive/ACK, idle/busy wakeup,
-permission rejection, disconnect/restart and conversation-only cleanup remain
-separate live acceptance gates. No release or 1.0 readiness is implied.

@@ -5,7 +5,7 @@ For 0.6.0, follow the [package/repository migration checklist](migration-0.6.0.m
 This branch prepares an installable package and a release-triggered npm workflow;
 it does not assert that npm already hosts the package.
 
-1. Review and merge the PR after the full CI (including package smoke) passes.
+1. Review and merge the PR after the syntax and unit-test CI passes.
 2. Confirm ownership/availability of npm package `@matuto-ai/antigravity-psst-connector`.
    For first publication, the maintainer may need npm's initial package creation
    flow. Do not send npm tokens through chat or commit them to GitHub.
@@ -14,11 +14,12 @@ it does not assert that npm already hosts the package.
    security configuration performed by the maintainer, not by this code change.
 4. Set package version and create a GitHub release whose tag is exactly
    `v<package.json version>` on the reviewed commit (`v0.6.0` for this release).
-5. The workflow records the exact commit/tree, builds one tarball, and runs all
-   tests against its verified installed bytes. Only then it publishes that same
-   tarball with provenance; it never repacks source after testing.
+5. The workflow records the exact commit/tree, builds one tarball and verifies
+   its installed bytes. The unit suite runs against the source checkout. The
+   workflow then publishes that same verified tarball with provenance; it never
+   repacks source before publication.
 6. The final read-only registry check must confirm name, version, tarball integrity
-   and `latest` match the tested artifact before the workflow reports success.
+   and `latest` match the verified artifact before the workflow reports success.
    A missing or divergent publication fails visibly, without republishing or
    changing tags automatically.
 

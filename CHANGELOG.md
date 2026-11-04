@@ -38,7 +38,7 @@
 
 ### Native acceptance gates
 
-Real interactive idle wakeup, hook argument overwrite reaching an executed native MCP tool, and immediate cleanup when a conversation alone is deleted remain unverified. The headless native permission denial was not bypassed; onboarding terms were not accepted. This release does **not** certify production automatic delivery. See [native pilot limitations](docs/native-pilot.md).
+Real interactive idle wakeup, hook argument overwrite reaching an executed native MCP tool, and immediate cleanup when a conversation alone is deleted remain unverified. The headless native permission denial was not bypassed; onboarding terms were not accepted. This release does **not** certify production automatic delivery. See [native capability limits](docs/setup.md#native-capability-and-acceptance-limits).
 
 The release includes source, deterministic tests, and package-install validation. It does not deploy a broker, enroll credentials, install into a user's client, or change native permission policy.
 

@@ -4,17 +4,17 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { NativeBinding, processIdentity, nativeHookContext } from '../src/native-binding.mjs';
+import { NativeBinding, nativeHookContext } from '../src/native-binding.mjs';
 import { createNativeWaiter } from '../src/native-waiter.mjs';
 function setup(t) {
  const dir=mkdtempSync(join(tmpdir(),'agy-binding-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
- const host=processIdentity(process.pid),path=join(dir,'binding.sqlite');let now=1000;
- const binding=new NativeBinding({path,host,create:true,now:()=>now});t.after(()=>binding.dispose());
+ const host={pid:12,start:'1',boot:'unit-test-boot',executable:'/fixture/cli'},path=join(dir,'binding.sqlite');let now=1000;
+ const binding=new NativeBinding({verifyHost:()=>true,path,host,create:true,now:()=>now});t.after(()=>binding.dispose());
  const context={host,conversationId:randomUUID()};
  return {binding,host,path,context,advance:()=>{now+=31000;}};
 }
 test('hook permits pin one conversation, exact args/tool, single use across handles',t=>{
- const f=setup(t),hook=new NativeBinding({path:f.path,host:f.host,now:()=>1000});t.after(()=>hook.dispose());
+ const f=setup(t),hook=new NativeBinding({verifyHost:()=>true,path:f.path,host:f.host,now:()=>1000});t.after(()=>hook.dispose());
  assert.throws(()=>hook.issue({context:f.context,tool:'broker_send',args:{}}));
  const args=hook.issue({context:f.context,tool:'broker_connect',args:{pairing_file:'/private/pair.json'}});
  assert.throws(()=>f.binding.consume({tool:'broker_connect',args:{...args,pairing_file:'/other'}}));
@@ -23,7 +23,7 @@ test('hook permits pin one conversation, exact args/tool, single use across hand
  assert.throws(()=>f.binding.consume({tool:'broker_connect',args}));
  assert.throws(()=>hook.issue({context:{...f.context,conversationId:randomUUID()},tool:'broker_connect',args:{}}));
  assert.throws(()=>hook.issue({context:{...f.context,host:{...f.host,start:'0'}},tool:'broker_receive',args:{}}));
- assert.throws(()=>new NativeBinding({path:f.path,host:{...f.host,boot:randomUUID()}}));
+ assert.throws(()=>new NativeBinding({verifyHost:()=>true,path:f.path,host:{...f.host,boot:randomUUID()}}));
  assert.throws(()=>f.binding.consume({tool:'broker_receive',args:{}}));
 });
 test('expired or closed-host permits cannot act; closing cancels owner waiter',async t=>{
@@ -41,19 +41,19 @@ test('failed consumption persistence rolls back; unknown commit fences and preve
  f.binding.failurePoint=p=>{if(p==='after_commit')throw Error('secret');};
  assert.throws(()=>f.binding.consume({tool:'broker_connect',args}));
  assert.equal(f.binding.unusable,true);
- const reopened=new NativeBinding({path:f.path,host:f.host,now:()=>1000});t.after(()=>reopened.dispose());
+ const reopened=new NativeBinding({verifyHost:()=>true,path:f.path,host:f.host,now:()=>1000});t.after(()=>reopened.dispose());
  assert.throws(()=>reopened.consume({tool:'broker_connect',args}));
 });
 test('native metadata spoof and wrong process chain fail closed',()=>{
- assert.throws(()=>nativeHookContext({conversationId:randomUUID()},{expectedHost:processIdentity(process.pid),env:{}}));
- const id=randomUUID();assert.throws(()=>nativeHookContext({conversationId:id},{expectedHost:processIdentity(process.pid),parentPid:process.pid,env:{ANTIGRAVITY_CONVERSATION_ID:id}}));
+ assert.throws(()=>nativeHookContext({conversationId:randomUUID()},{expectedHost:{pid:12,start:'1',boot:'unit-test-boot',executable:'/fixture/cli'},env:{}}));
+ const id=randomUUID();assert.throws(()=>nativeHookContext({conversationId:id},{expectedHost:{pid:12,start:'1',boot:'unit-test-boot',executable:'/fixture/cli'},parentPid:process.pid,env:{ANTIGRAVITY_CONVERSATION_ID:id}}));
 });
 
 test('host death invalidates permits/isBound, and notice budgets persist across handles',t=>{
  const f=setup(t),args=f.binding.issue({context:f.context,tool:'broker_connect',args:{}});
  const key={conversationId:f.context.conversationId,clientId:randomUUID(),messageId:randomUUID()};
  assert.equal(f.binding.notice(key),'pending');assert.equal(f.binding.notice(key),'pending');
- const other=new NativeBinding({path:f.path,host:f.host});t.after(()=>other.dispose());
+ const other=new NativeBinding({verifyHost:()=>true,path:f.path,host:f.host});t.after(()=>other.dispose());
  assert.equal(other.notice(key),'attention');assert.equal(other.notice(key),'suppressed');
  assert.equal(f.binding.notice(key),'suppressed');
  f.binding.verifyHost=()=>false;

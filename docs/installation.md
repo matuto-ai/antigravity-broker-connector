@@ -130,8 +130,5 @@ is valid; inspect the separate registration and launcher status fields. Finding
 start a nested host. Use the current TUI's native `/plugin` manager for the actual
 installation and ordinary permissions; stop on denial or an owner lock.
 
-`scripts/validate-official-native.sh` independently checks supported manager
-install and repeated install in temporary HOME using pinned official CLI 1.4.7,
-then asserts exactly one enabled registration with the expected package version.
-This manager-only check needs no authentication and does not certify the user's
-`agy` wrapper, current host, model wakeup or authenticated delivery.
+The unit suite covers read-only installation inspection using temporary package
+fixtures. It does not install or launch the official native CLI.

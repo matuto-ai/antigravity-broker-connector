@@ -1,31 +1,13 @@
-// Test/release assembly only. Never downloads a connector or runs package scripts.
+// Release assembly only. Never downloads a connector or runs package scripts.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { copyFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const NAME = '@matuto-ai/antigravity-psst-connector';
 const FORMAT = 'antigravity-candidate-v1';
-const FIXTURES = Object.freeze({ 'ai-agent-msg-broker': 'f32ddc79ec7b812062ed3f6de7b9a0c12a7128f3', 'psst-approval': '72f5d2d1b834e02cfb6b2f7dc11c6f1a55729344' });
-// Only reviewed test entrypoints/helpers may accompany the package. In particular,
-// copying scripts/ or docs/ wholesale could restore an omitted runtime dependency
-// and make the test projection pass while the installed tarball fails.
-// This is a bounded support allowlist, not a module-resolution sandbox: listed
-// helpers and *.test.mjs entrypoints must remain test-only. A new runtime dependency
-// belongs in package.files, never in this list just to make a test pass. README and
-// documentation used by the tests must come from the package itself.
-const TEST_SUPPORT = new Set([
-  'bin/launch.mjs', 'bin/mcp-proxy.mjs', 'bin/native-hook.mjs',
-  '.github/workflows/verify.yaml', '.github/workflows/npm-publish.yml', '.github/workflows/native-waiter-once.yaml',
-  'scripts/candidate-artifact.mjs', 'scripts/test-stage.mjs', 'scripts/prepare-native-proof.mjs', 'scripts/verify-published-artifact.mjs',
-  'scripts/container-persistence-worker.mjs',
-  'scripts/native-contract-proof/actual-plugin-fixture.mjs', 'scripts/native-contract-proof/approval-broker-fixture.mjs',
-  'scripts/native-contract-proof/message-provider-step.mjs', 'scripts/native-contract-proof/actual-provider-step.mjs',
-  // Read as text by the permission-boundary regression tests; not executed here.
-  'scripts/native-contract-proof/run-actual.sh', 'scripts/native-contract-proof/actual-worker.mjs',
-]);
 const REQUIRED = ['package.json', 'plugin.json', 'mcp_config.json', 'hooks.json', 'bin/psst-antigravity.mjs', 'bin/psst-antigravity-native.mjs', 'scripts/prepare-native-plugin.mjs'];
 const hash = (bytes, algorithm = 'sha256', encoding = 'hex') => createHash(algorithm).update(bytes).digest(encoding);
 const digest = value => hash(JSON.stringify(value));
@@ -126,7 +108,7 @@ function readEvidence(artifactRoot) {
   return evidence;
 }
 
-/** No subprocesses or source checkout required; safe for the isolated native fixture. */
+/** Verify installed release bytes without subprocesses or a source checkout. */
 export function verifyArtifactPackage({ packageRoot, evidence }) {
   assert(evidence?.format === FORMAT && Array.isArray(evidence.package?.files), 'candidate_evidence_invalid');
   const files = inventory(packageRoot);
@@ -157,8 +139,7 @@ export function prepareCandidate({ sourceRoot, artifactRoot, requireClean = fals
     same(sourceSnapshot(sourceRoot, requireClean), source, 'candidate_source_changed_during_preparation');
     const evidence = { format: FORMAT, source, package: { ...metadata, digest: digest(files), files }, tarball: { filename, size: bytes.length, sha256: hash(bytes), integrity } };
     verifyArtifactPackage({ packageRoot: paths.packageRoot, evidence });
-    // Public source/artifact hashes only. Readable when mounted in a non-owner,
-    // read-only Docker fixture; the private staging parent remains mode 0700.
+    // Public source/artifact hashes only; the private staging parent remains mode 0700.
     writeFileSync(join(artifactRoot, 'candidate.json'), JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx', mode: 0o644 });
     return { ...paths, tarballPath, evidence };
   } catch (error) { rmSync(artifactRoot, { recursive: true, force: true }); throw error; }
@@ -178,77 +159,15 @@ export function verifyCandidate({ sourceRoot, artifactRoot, requireClean = false
   return { ...paths, tarballPath, evidence };
 }
 
-function projectionFiles(candidate) {
-  const files = new Map(candidate.evidence.package.files.map(file => [file.path, file]));
-  for (const file of candidate.evidence.source.files) {
-    if (file.missing || !(TEST_SUPPORT.has(file.path) || /^test\/[^/]+\.test\.mjs$/.test(file.path))) continue;
-    const expected = { path: file.path, size: file.size, sha256: file.sha256 };
-    if (files.has(file.path)) same(files.get(file.path), expected, 'candidate_support_collision');
-    else files.set(file.path, expected);
-  }
-  return [...files.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-}
-function fixtureTargets(fixtureRoots) {
-  return Object.entries(fixtureRoots).map(([name, root]) => {
-    assert(Object.hasOwn(FIXTURES, name), 'candidate_fixture_not_allowed');
-    const target = realpathSync(resolve(root));
-    assert(run('git', ['rev-parse', 'HEAD'], target) === FIXTURES[name], 'candidate_fixture_pin_mismatch');
-    assert(run('git', ['status', '--porcelain=v1', '--untracked-files=no'], target) === '', 'candidate_fixture_modified');
-    return [name, target];
-  });
-}
-export function createTestProjection({ sourceRoot, artifactRoot, fixtureRoots = {}, requireClean = false, verifyOnly = false }) {
-  const candidate = verifyCandidate({ sourceRoot, artifactRoot, requireClean });
-  const parent = join(candidate.artifactRoot, 'test'), projectionRoot = join(parent, 'connector');
-  const files = projectionFiles(candidate), targets = fixtureTargets(fixtureRoots);
-  if (!existsSync(projectionRoot)) {
-    assert(!verifyOnly, 'candidate_test_projection_missing');
-    mkdirSync(projectionRoot, { recursive: true, mode: 0o700 });
-    const packaged = new Set(candidate.evidence.package.files.map(file => file.path));
-    for (const file of files) {
-      const origin = join(packaged.has(file.path) ? candidate.packageRoot : candidate.sourceRoot, file.path), destination = join(projectionRoot, file.path);
-      mkdirSync(dirname(destination), { recursive: true });
-      copyFileSync(origin, destination);
-      chmodSync(destination, lstatSync(origin).mode & 0o777);
-    }
-  }
-  // Verify the existing runtime/support copy before adding any fixture sibling.
-  // A local stage may run first without broker fixtures; integration adds them.
-  same(inventory(projectionRoot), files, 'candidate_test_projection_changed');
-  const existing = readdirSync(parent).filter(name => name !== 'connector');
-  const existingTargets = {};
-  for (const name of existing) {
-    assert(Object.hasOwn(FIXTURES, name) && lstatSync(join(parent, name)).isSymbolicLink(), 'candidate_test_fixture_inventory_changed');
-    existingTargets[name] = realpathSync(join(parent, name));
-  }
-  fixtureTargets(existingTargets);
-  for (const [name, target] of targets) {
-    if (Object.hasOwn(existingTargets, name)) assert(existingTargets[name] === target, 'candidate_test_fixture_changed');
-    else { assert(!verifyOnly, 'candidate_test_fixture_missing'); symlinkSync(target, join(parent, name), 'dir'); }
-  }
-  verifyCandidate({ sourceRoot, artifactRoot, requireClean });
-  return projectionRoot;
-}
-
-export function verifyTestProjection(options) {
-  assert(existsSync(join(resolve(options.artifactRoot), 'test', 'connector')), 'candidate_test_projection_missing');
-  return createTestProjection({ ...options, verifyOnly: true });
-}
-
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [command, sourceRoot, artifactRoot, ...flags] = process.argv.slice(2);
-    assert(sourceRoot && artifactRoot && flags.every(flag => flag === '--require-clean'), 'usage: candidate-artifact.mjs prepare|verify|package-root|tarball-path|test-stage SOURCE ARTIFACT [--require-clean]');
+    assert(sourceRoot && artifactRoot && flags.every(flag => flag === '--require-clean'), 'usage: candidate-artifact.mjs prepare|verify|package-root|tarball-path SOURCE ARTIFACT [--require-clean]');
     const options = { sourceRoot, artifactRoot, requireClean: flags.includes('--require-clean') };
-    if (command === 'test-stage') {
-      const fixtureRoots = Object.fromEntries(Object.keys(FIXTURES).map(name => [name, resolve(sourceRoot, '..', name)]).filter(([, path]) => existsSync(path)));
-      console.log(createTestProjection({ ...options, fixtureRoots }));
-    } else {
-      assert(['prepare', 'verify', 'package-root', 'tarball-path'].includes(command), 'candidate_unknown_command');
-      const candidate = command === 'prepare' ? prepareCandidate(options) : verifyCandidate(options);
-      console.log(command === 'package-root' ? candidate.packageRoot : command === 'tarball-path' ? candidate.tarballPath : JSON.stringify({ packageRoot: candidate.packageRoot, tarballPath: candidate.tarballPath,
-        commit: candidate.evidence.source.commit, tree: candidate.evidence.source.tree, sourceDigest: candidate.evidence.source.digest,
-        dirty: candidate.evidence.source.dirty, package: { name: candidate.evidence.package.name, version: candidate.evidence.package.version, digest: candidate.evidence.package.digest }, tarball: candidate.evidence.tarball }));
-    }
+    assert(['prepare', 'verify', 'package-root', 'tarball-path'].includes(command), 'candidate_unknown_command');
+    const candidate = command === 'prepare' ? prepareCandidate(options) : verifyCandidate(options);
+    console.log(command === 'package-root' ? candidate.packageRoot : command === 'tarball-path' ? candidate.tarballPath : JSON.stringify({ packageRoot: candidate.packageRoot, tarballPath: candidate.tarballPath,
+      commit: candidate.evidence.source.commit, tree: candidate.evidence.source.tree, sourceDigest: candidate.evidence.source.digest,
+      dirty: candidate.evidence.source.dirty, package: { name: candidate.evidence.package.name, version: candidate.evidence.package.version, digest: candidate.evidence.package.digest }, tarball: candidate.evidence.tarball }));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
