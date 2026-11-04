@@ -4,6 +4,15 @@ import {openSync,closeSync,fstatSync,constants} from 'node:fs';
 import { join } from 'node:path';
 import { NativeBinding,processIdentity } from './native-binding.mjs';
 import { readPrivate } from './installation.mjs';
+
+/** A setup/connection notification contains no credential or peer message. */
+export function approvalWaiterNotice(initial,status){
+ if(status.requestId!==initial.requestId)return 'Psst setup waiter stopped: request changed. Do not re-arm automatically.';
+ if(status.state==='approved')return 'Psst saved installation connected. Call broker_setup_status and arm its native inbox waiter under normal permissions. Installation access is not human approval of agent messages.';
+ if(!['pending','reconnecting'].includes(status.state))return 'Psst setup needs attention or was cancelled. Call broker_setup_status once; do not start an automatic retry loop.';
+ return null;
+}
+
 /** Body-free native background completion, never a model polling loop or ACK. */
 export async function waitApproval({directory,permit,signal}){
  const owner=readPrivate(join(directory,'owner.json'));
@@ -18,9 +27,7 @@ export async function waitApproval({directory,permit,signal}){
   while(!signal?.aborted){
    if(!binding.isBound(conversationId)||readPrivate(join(directory,'owner.json')).ownerEpoch!==owner.ownerEpoch||JSON.stringify(processIdentity(owner.connectorProcess.pid))!==JSON.stringify(owner.connectorProcess))return 'Psst setup waiter stopped: native owner changed. Do not retry automatically.';
    const status=readPrivate(join(directory,'approval.json'));
-   if(status.requestId!==initial.requestId)return 'Psst setup waiter stopped: request changed. Do not re-arm automatically.';
-   if(status.state==='approved')return 'Psst setup approved. Call broker_setup_status; if connected, arm its native inbox waiter under normal permissions. Approval is installation access, not human approval of agent messages.';
-   if(status.state!=='pending')return 'Psst setup needs attention or was cancelled. Call broker_setup_status once; do not start an automatic retry loop.';
+   const notice=approvalWaiterNotice(initial,status);if(notice)return notice;
    await delay(1000,undefined,{signal});
   }
   return 'Psst setup waiter cancelled. Do not re-arm automatically.';

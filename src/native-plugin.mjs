@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { NativeBinding, processIdentity, nativeHookContext } from './native-binding.mjs';
 import { prepareStateRoot, readConnectorConfig } from './connector-config.mjs';
-import { openInstallation, installationDirectory, savePrivate } from './installation.mjs';
+import { openInstallation, installationDirectory, savePrivate, readApprovalParent } from './installation.mjs';
 import { createApprovalManager } from './approval-manager.mjs';
 import { pairConnector } from './pairing.mjs';
 import { startNativeSession } from './native-session.mjs';
@@ -61,7 +61,8 @@ export function hookDecision({input,context,binding,directory}) {
 }
 
 export async function serveNativePlugin({base=nativeBase(),host=processIdentity(process.ppid),input=process.stdin,output=process.stdout,
-  sessionFactory=startNativeSession,pair=pairConnector,configReader=readConnectorConfig,approvalApi,installationRoot=base===nativeBase()?installationDirectory():join(base,'installation'),isHostAlive=()=>{try{return JSON.stringify(processIdentity(host.pid))===JSON.stringify(host);}catch{return false;}},signal}={}) {
+  sessionFactory=startNativeSession,pair=pairConnector,configReader=readConnectorConfig,approvalApi,
+  bindingFactory=options=>new NativeBinding(options),now=Date.now,installationRoot=base===nativeBase()?installationDirectory():join(base,'installation'),isHostAlive=()=>{try{return JSON.stringify(processIdentity(host.pid))===JSON.stringify(host);}catch{return false;}},signal}={}) {
   prepareStateRoot(base);const directory=ownerDirectory(base,host);prepareStateRoot(directory);
   const lockPath=join(directory,'mcp-owner.sqlite');
   const fd=openSync(lockPath,constants.O_CREAT|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);
@@ -71,7 +72,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
   try {
     ownerLock.exec('PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE; CREATE TABLE IF NOT EXISTS owner(id INTEGER);');
     const path=join(directory,'binding.sqlite');
-    binding=new NativeBinding({path,host,create:!existsSync(path),strictRoot:true});binding.startOwner(ownerEpoch);
+    binding=bindingFactory({path,host,create:!existsSync(path),strictRoot:true});binding.startOwner(ownerEpoch);
     save(join(directory,'owner.json'),{host,ownerEpoch,connectorProcess:processIdentity(process.pid),server:NATIVE_SERVER});
   } catch {binding?.dispose();ownerLock.close();throw Error('native_owner_unavailable');}
   const stateFile=join(directory,'session.json');let session,connecting=false,closed=false,epoch=0,attempt,manager,timer,disabled=false,recoveryBlocked=false;
@@ -81,18 +82,18 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
     clientId:session?.identity.client_id??null,inboxPath:session?join(session.inbox.directory,'inbox.sqlite'):null});
   try{state();}catch{try{binding.endOwner();}finally{binding.dispose();ownerLock.close();}throw Error('native_state_unavailable');}
   const controller=new AbortController();
-  let rootGeneration=0,transitioning=false,admission=Promise.resolve(),tickPromise;
+  let rootGeneration=0,setupGeneration=0,transitioning=false,admission=Promise.resolve(),tickPromise;
   const activeTools=new Set();
   const currentRoot=(root,generation)=>!closed&&!transitioning&&rootGeneration===generation&&binding.isBound(root);
   const enqueue=fn=>{const task=admission.then(fn);admission=task.then(()=>{},()=>{});return task;};
   const disconnect=async()=>{
-    epoch++;attempt?.abort();const old=session;session=undefined;let failed=false;
+    epoch++;attempt?.abort();reconnectAt=0;const old=session;session=undefined;let failed=false;
     try{binding.invalidatePermits();state();}catch{failed=true;closed=true;controller.abort();try{binding.closeHost();}catch{}}
     try{await old?.close();}finally{if(failed)throw Error('native_state_unavailable');}
   };
   let closing;
   const close=()=>closing??=(async()=>{closed=true;clearInterval(timer);manager?.close();controller.abort();try{await disconnect();await Promise.allSettled([...activeTools,admission,tickPromise,manager?.done].filter(Boolean));}finally{try{binding.endOwner();}catch{}finally{binding.dispose();ownerLock.close();}}})();
-  const api=approvalApi??Object.fromEntries(['beginApproval','pollApproval','readApprovalState'].map(name=>[name,async options=>(await import('../vendor/psst/approval.mjs'))[name](options)]));
+  const api=approvalApi??Object.fromEntries(['beginApproval','pollApproval','readApprovalState'].map(name=>[name,async options=>{const result=await (await import('../vendor/psst/approval.mjs'))[name](options);return result?{...result,parentRequestId:readApprovalParent({...options,requestId:result.requestId})}:null; }]));
   function observedMetadata(config, conversationId){
     const event=binding.rootObservation(conversationId);
     return nativeMetadata(config,event,{host,conversationId});
@@ -109,22 +110,30 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
       recoverySource={conversationId,file,source,expectedEpoch};void tick();
     }
   }
-  async function prepareApproved(file){
+  async function prepareApproved(file,startupSetupGeneration){
     const conversationId=binding.assertHost().conversation,startedEpoch=epoch,startedGeneration=rootGeneration;
     if(!conversationId||closed||!isHostAlive())throw Error('native_host_unavailable');
     const config=configReader(file,{});
     const registrationConfig={...config,metadata:observedMetadata(config,conversationId)};
     let candidate;candidate=await createSession({config:registrationConfig,conversationId,observeMetadata:()=>observedMetadata(config,conversationId),isAlive:()=>isHostAlive()&&rootGeneration===startedGeneration&&binding.isBound(conversationId),signal:controller.signal,onUnavailable:reason=>{void unavailableCandidate(candidate,reason,{conversationId,file,registrationVersion:config.registrationVersion??1}).catch(()=>{});}});
-    if(!currentRoot(conversationId,startedGeneration)||epoch!==startedEpoch){await candidate.close({closeSession:false});throw Error('native_host_unavailable');}
-    return {...candidate,conversationId,rootGeneration:startedGeneration,source:{connection_file:file}};
+    if(!currentRoot(conversationId,startedGeneration)||epoch!==startedEpoch||(startupSetupGeneration!==undefined&&startupSetupGeneration!==setupGeneration)){await candidate.close({closeSession:false});throw Error('native_host_unavailable');}
+    return {...candidate,conversationId,rootGeneration:startedGeneration,startupSetupGeneration,source:{connection_file:file}};
   }
-  async function stageApproved(candidate){if(!currentRoot(candidate.conversationId,candidate.rootGeneration)){await candidate.close({closeSession:false});throw Error('native_root_changed');}const old=session,oldDisabled=disabled;session=candidate;disabled=false;const stagedEpoch=++epoch;try{state();}catch(error){session=old;disabled=oldDisabled;throw error;}
-    return {async rollback(){if(epoch===stagedEpoch&&session===candidate){session=old;disabled=oldDisabled;epoch++;state();}else{try{await old?.close();}catch{}}},async finalize(){try{await old?.close();}catch{/* Selected new session remains usable despite old cleanup failure. */}}};
+  async function stageApproved(candidate){if(!currentRoot(candidate.conversationId,candidate.rootGeneration)||(candidate.startupSetupGeneration!==undefined&&candidate.startupSetupGeneration!==setupGeneration)){await candidate.close({closeSession:false});throw Error('native_root_changed');}const old=session,oldDisabled=disabled,oldReconnectAt=reconnectAt;session=candidate;disabled=false;reconnectAt=0;const stagedEpoch=++epoch;try{state();}catch(error){session=old;disabled=oldDisabled;reconnectAt=oldReconnectAt;throw error;}
+    return {async rollback(){if(epoch===stagedEpoch&&session===candidate){session=old;disabled=oldDisabled;reconnectAt=oldReconnectAt;epoch++;state();}else{try{await old?.close();}catch{}}},async finalize(){try{await old?.close();}catch{/* Selected new session remains usable despite old cleanup failure. */}}};
   }
   async function attachApproved(candidate){const staged=await stageApproved(candidate);await staged.finalize();}
-  function newManager(){const generation=rootGeneration;return createApprovalManager({installation,api,isAlive:()=>!closed&&!transitioning&&generation===rootGeneration&&isHostAlive(),onStatus:status=>{if(generation===rootGeneration&&!transitioning)savePrivate(join(directory,'approval.json'),status);},activate:{prepare:prepareApproved,commit:stageApproved}});}
+  function newManager(){const generation=rootGeneration;return createApprovalManager({installation,api,isAlive:()=>!closed&&!transitioning&&generation===rootGeneration&&isHostAlive(),onStatus:status=>{if(generation===rootGeneration&&!transitioning)savePrivate(join(directory,'approval.json'),status);},
+    onBegin:()=>{
+      // Only a validated, durably reserved explicit intent supersedes startup.
+      // Invalid input or a failed initial read leaves the working attempt alone.
+      const conversationId=binding.assertHost().conversation;
+      if(!currentRoot(conversationId,generation))throw Error('native_root_changed');
+      installation.suppressSetup(conversationId,false);installation.setSessionDisabled(conversationId,false);
+      setupGeneration++;approvalResumed=true;disabled=false;reconnectAt=0;state();recoveryBlocked=false;recoverySource=undefined;
+    },activate:{prepare:prepareApproved,commit:stageApproved}});}
   manager=newManager();
-  let attemptedRevision,approvalResumed=false,ticking=false,recoverySource;
+  let attemptedRevision,approvalResumed=false,ticking=false,recoverySource,reconnectAt=0,reconnectFailures=0;
   function tick(){if(ticking||closed||transitioning)return tickPromise??Promise.resolve();tickPromise=runTick();return tickPromise;}
   async function runTick(){
     if(ticking||closed||transitioning)return;ticking=true;const generation=rootGeneration,activeManager=manager;
@@ -140,22 +149,31 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
         try{const candidate=await prepareApproved(recovery.file);candidate.source=recovery.source;await attachApproved(candidate);}catch(error){recoveryBlocked=true;throw error;}finally{connecting=false;}
       }
       if(!session&&!connecting&&!disabled&&manager.status.state!=='pending'){
-       const selected=installation.selected();if(selected&&attemptedRevision!==selected.revision){
-        attemptedRevision=selected.revision;connecting=true;
-        try{await attachApproved(await prepareApproved(selected.connectionFile));manager.adopt(selected);}finally{connecting=false;}
+       const selected=installation.selected();if(selected&&(attemptedRevision!==selected.revision||(reconnectAt&&now()>=reconnectAt))){
+        if(attemptedRevision!==selected.revision)reconnectFailures=0;
+        attemptedRevision=selected.revision;reconnectAt=0;connecting=true;const connectionEpoch=epoch,connectionSetupGeneration=setupGeneration;
+        try{await attachApproved(await prepareApproved(selected.connectionFile,connectionSetupGeneration));reconnectFailures=0;if(manager.status.state!=='pending')manager.adopt(selected);}
+        catch(error){
+          if(closed||disabled||epoch!==connectionEpoch||setupGeneration!==connectionSetupGeneration||!currentRoot(binding.assertHost().conversation,generation))return;
+          if(error.retryable!==true||recoveryBlocked)throw error;
+          const backoff=Math.min(30000,2000*2**Math.min(reconnectFailures++,4));
+          const cooldown=Number.isFinite(error.retryAfterMs)?error.retryAfterMs:Number.isFinite(error.retryAfter)?error.retryAfter*1000:0;
+          reconnectAt=now()+Math.max(backoff,Math.min(300000,Math.max(0,cooldown)));
+          if(manager.status.state!=='pending')manager.reconnect(selected);
+        }finally{connecting=false;}
        }
       }
       if(!approvalResumed&&!disabled&&!installation.setupSuppressed(binding.assertHost().conversation)){approvalResumed=true;await manager.resume();}
-    }catch{if(generation===rootGeneration&&!transitioning)activeManager.attention();}finally{ticking=false;}
+    }catch{if(!closed&&!disabled&&generation===rootGeneration&&!transitioning)activeManager.attention();}finally{ticking=false;}
   }
   timer=setInterval(()=>{void tick();},1000);timer.unref?.();
   const tools={};
   async function execute(def,verified,context){
     if(closed||!isHostAlive())throw Error('native_host_unavailable');
     if(!session&&!['broker_setup','broker_setup_status','broker_connect','broker_disconnect','broker_cancel_setup'].includes(def.name))await tick();
-    if(def.name==='broker_setup'){installation.suppressSetup(verified.conversationId,false);installation.setSessionDisabled(verified.conversationId,false);disabled=false;state();const wasRecoveryBlocked=recoveryBlocked;recoveryBlocked=false;recoverySource=undefined;try{const status=await manager.begin(verified.args.broker_url);return {...status,waiter_command:approvalWaiterCommand(directory),automatic_delivery_certified:false};}catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;}}
-    if(def.name==='broker_setup_status'){await tick();return {...manager.status,connector_runtime:CONNECTOR_RUNTIME,connected:Boolean(session),mode:'automatic_required',readiness:session?'native_wakeup_acceptance_unverified':'not_connected',...(session?{waiter_command:waiterCommand(directory)}:manager.status.state==='pending'?{waiter_command:approvalWaiterCommand(directory)}:{})};}
-    if(def.name==='broker_cancel_setup'){installation.suppressSetup(verified.conversationId,true);return manager.cancel();}
+    if(def.name==='broker_setup'){const wasRecoveryBlocked=recoveryBlocked;try{const status=await manager.begin(verified.args.broker_url);return {...status,waiter_command:approvalWaiterCommand(directory),automatic_delivery_certified:false};}catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;}}
+    if(def.name==='broker_setup_status'){await tick();const waiting=['pending','reconnecting'].includes(manager.status.state);return {...manager.status,connector_runtime:CONNECTOR_RUNTIME,connected:Boolean(session),mode:'automatic_required',readiness:session?'native_wakeup_acceptance_unverified':reconnectAt?'reconnecting':'not_connected',...(reconnectAt?{retry_after_ms:Math.max(0,reconnectAt-now())}:{}),...(waiting?{waiter_command:approvalWaiterCommand(directory)}:session?{waiter_command:waiterCommand(directory)}:{})};}
+    if(def.name==='broker_cancel_setup'){approvalResumed=true;installation.suppressSetup(verified.conversationId,true);return manager.cancel();}
     if(def.name==='broker_connect') {
       if(connecting)throw Error('native_connect_in_progress');
       const a=verified.args;
@@ -174,7 +192,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
         let candidate;candidate=await createSession({config:registrationConfig,conversationId:verified.conversationId,observeMetadata:()=>observedMetadata(config,verified.conversationId),isAlive:()=>isHostAlive()&&rootGeneration===startedGeneration&&binding.isBound(verified.conversationId),signal:AbortSignal.any([controller.signal,attempt.signal]),
           onUnavailable:reason=>{void unavailableCandidate(candidate,reason,{conversationId:verified.conversationId,file,registrationVersion:config.registrationVersion??1}).catch(()=>{});}});
         if(!currentRoot(verified.conversationId,startedGeneration)||epoch!==startedEpoch){await candidate.close({closeSession:false});throw Error('native_host_unavailable');}
-        installation.setSessionDisabled(verified.conversationId,false);disabled=false;session={...candidate,conversationId:verified.conversationId,source:a};epoch++;
+        installation.setSessionDisabled(verified.conversationId,false);disabled=false;reconnectAt=0;session={...candidate,conversationId:verified.conversationId,source:a};epoch++;
         try{state();}catch{await disconnect();throw Error('native_state_unavailable');}
         return {connected:true,...session.identity,waiter_command:waiterCommand(directory),automatic_delivery_certified:false};
       } catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;} finally{connecting=false;attempt=undefined;}
@@ -202,7 +220,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
         await old?.close({closeSession:false});
         await Promise.allSettled([...activeTools,oldManager.done,tickPromise].filter(Boolean));
         const verified=binding.activateRoot({tool:def.name,args,nativeMeta:context?.nativeMeta,expectedRoot:inspected.previousRoot,expectedGeneration:inspected.generation,expectedOwnerEpoch:inspected.ownerEpoch});
-        recoveryBlocked=false;disabled=installation.sessionDisabled(verified.conversationId);attemptedRevision=undefined;approvalResumed=false;
+        recoveryBlocked=false;disabled=installation.sessionDisabled(verified.conversationId);attemptedRevision=undefined;reconnectAt=0;reconnectFailures=0;approvalResumed=false;
         transitioning=false;manager=newManager();state();return verified;
       } catch(error){closed=true;controller.abort();try{binding.closeHost();}catch{}queueMicrotask(()=>{void close().catch(()=>{});});throw error;}
     }

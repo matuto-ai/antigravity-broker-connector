@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { approvalWaiterNotice } from '../src/approval-waiter.mjs';
 import { createNativeWaiter, PENDING_NOTICE } from '../src/native-waiter.mjs';
 
 function fixture() {
@@ -54,4 +55,15 @@ test('failed subscription cleanup fences the waiter instead of claiming clean re
     subscribe:()=>()=>{throw new Error('secret implementation detail');}});
   await assert.rejects(waiter.wait(),/^Error: native_waiter_unavailable$/);
   await assert.rejects(waiter.wait(),/^Error: native_waiter_unavailable$/);
+});
+
+
+test('approval waiter remains quiet during saved reconnect and wakes only for the same request', () => {
+  const requestId = randomUUID(), initial = { state: 'reconnecting', requestId };
+  for (const state of ['pending', 'reconnecting']) assert.equal(approvalWaiterNotice(initial, { state, requestId }), null);
+  assert.match(approvalWaiterNotice(initial, { state: 'approved', requestId }), /saved installation connected/);
+  for (const state of ['denied', 'expired', 'revoked', 'cancelled', 'attention_required']) {
+    assert.match(approvalWaiterNotice(initial, { state, requestId }), /needs attention or was cancelled/);
+  }
+  assert.match(approvalWaiterNotice(initial, { state: 'approved', requestId: randomUUID() }), /request changed/);
 });

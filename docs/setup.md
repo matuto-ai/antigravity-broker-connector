@@ -24,7 +24,8 @@ A missing `antigravity` executable does not imply the in-session manager is miss
 The doctor does not invoke either launcher or modify native registration.
 
 It verifies source existence, a root-level `plugin.json`, required package files,
-aligned version, runtime range and bundled reference bytes. It is not a native
+aligned version, runtime range, the complete native runtime file set, exact packaged
+hook/MCP definitions and bundled reference bytes. It is not a native
 permission or connection test. An echoed pathname is not existence evidence.
 `psst-antigravity doctor /absolute/package/root` can inspect an explicit source;
 a directory containing a nested connector folder is not the plugin root.
@@ -68,10 +69,22 @@ creates an enrollment request.
 Normal startup never creates an enrollment request or rotates a key. A durable
 previously requested pending enrollment may be resumed using GET-only polling;
 closing before approval and reopening afterwards does not require another setup.
+An uncertain setup POST recovers its durably saved request in the same process
+using GET only, respecting the server cooldown. If no exact saved candidate can
+be established, setup stops for attention instead of inventing a replacement.
+A saved approved connection retries transient startup failures with bounded
+backoff and the same conversation/configuration. Its status is `reconnecting`;
+arm the returned status waiter once, then the inbox waiter after restoration.
+This is local transport recovery, not model polling.
 Unknown/network outcomes retain the same local request/token. Denial, expiry,
 revocation or corrupt state needs explicit attention, never automatic replacement.
 Explicit setup again requests replacement while keeping the old working selection
-until the candidate attaches and the selection compare-and-swap commits.
+until the candidate attaches and the selection compare-and-swap commits. Each
+replacement records its exact parent request before creating a candidate; lost
+responses resume only that parent’s saved child. Request deadlines constrain
+pending approval, never a separately valid approved credential. While
+replacement is pending, status returns the approval waiter even if the old
+connection is still active, so its completion can re-arm the new inbox.
 
 ## Persistence/bootstrap contract
 
@@ -98,20 +111,19 @@ Do not delete old directories on replacement or upgrade.
 
 Transient host bindings/waiter ownership remain separate under
 `~/.config/psst/antigravity/native`; do not mount/share this directory between
-containers. The reviewed sandbox archive a7f63e8 (`agents/agy/config.sh`) mounts
-`projects/<project>/agy/<identity>/gemini` at `/home/node/.gemini` and uses an
-`agy-shell-gemini` volume for shell state. The default installation root is
-therefore persistent per project/identity in that archived layout. To share one
-Psst installation across projects, bootstrap can mount only a dedicated private
-`$CONFIG_DIR/psst/antigravity/installation` at `/home/node/.config/psst-installation`
-and set `PSST_ANTIGRAVITY_INSTALLATION_DIR` to that path. Do NOT share entire
-`.gemini` conversation databases or the provider keyring. That archived native
-policy rejected plugin/MCP imports; this historical source is not a diagnosis of
-the current host. The owner subsequently installed the native plugin successfully.
-Any current policy denial needs separately reviewed administrator integration,
-never an adapter bypass. No bootstrap file was
-changed by this connector. Actual user mounts have not been inspected; these paths are the
-connector contract, not a claim about an existing deployment.
+containers. A container image must keep the reviewed plugin code and its native-manager
+registration provisioned, or preserve the normal per-identity native home that
+contains them. The official CLI stages the managed package at
+`~/.gemini/config/plugins/psst-native`; doctor inspects that package plus the
+observed CLI 1.4.7 `~/.gemini/config/import_manifest.json` registration. Saving
+only Psst authorization does not reinstall missing plugin code/registration.
+
+For shared bootstrap, mount only a dedicated private installation directory at
+the same absolute path and set `PSST_ANTIGRAVITY_INSTALLATION_DIR` accordingly.
+Do not share entire `.gemini` conversation databases, provider credentials or
+transient host bindings. No custom `agy` wrapper or policy adapter is required
+by this connector. These are documented paths, not an inspection of the user's
+current mounts; recreate-container validation is deferred to the user's machine.
 
 `broker_disconnect` stops this host's transport and locally cancels pending setup
 resumption; `broker_cancel_setup` leaves existing approved transport intact.
@@ -136,8 +148,11 @@ root. Retired roots cannot reclaim the same host. Same-root MCP restart preserve
 its binding and journal; stale owner epochs and permits remain invalid.
 
 Hooks record bounded per-conversation model/project observations but cannot switch
-routing. No reliable ConversationClosed/SessionEnd event was established; deleting
-a conversation alone remains a cleanup acceptance gate. Real authenticated
+routing. The documented CLI hook API has no ConversationClosed/SessionEnd event. `Stop`
+means the execution loop ended, including ordinary idle turns, and must not be
+used to close a receiving conversation. Cleanup follows explicit disconnect,
+verified root transition, MCP close or exact host-process loss. Deletion alone
+is not an observable lifecycle boundary through the supported hook API. Real authenticated
 `/compact` continuity is not certified by the connector unit tests.
 
 The background command waiter uses supported native completion notifications;
@@ -149,30 +164,8 @@ successful task execution. Real authenticated interactive idle wakeup remains
 unverified; previous headless permission denial was not bypassed. The native
 route remains experimental, not a certified production automatic-receive claim.
 
-Sources: https://www.antigravity.google/docs/plugins and
-https://www.antigravity.google/docs/hooks (checked2026-10-26).
-
-### Historical sandbox-specific bootstrap review (conditional, not applied)
-
-The following applies only if a deployment is positively identified as using the
-archived sandbox policy above. It is not a prerequisite for the official CLI or
-a requirement to build a new wrapper/status API. Preserve that deployment's
-`agy-policy.py` rejection of arbitrary project/global integrations. The
-narrow addition would allow exactly the reviewed `psst-native` plugin under the
-native manager's installation directory, with a pinned package/digest and its
-known `plugin.json`, `hooks.json`, `mcp_config.json`, two skills and runtime files.
-Validate every plugin path as a regular, non-symlink image-managed file; reject
-additional plugins, servers, hook commands, custom providers and unknown registry
-entries. Permit only the plugin's Node executable/serve command and exact native
-hook entrypoints; do not enable all MCP servers or add permission-skip options.
-The native manager's own registry/import-manifest formats must be inspected and
-allowlisted narrowly as part of that separate bootstrap review. Mount only the
-private installation directory described above; keep native host bindings and
-provider auth separate. Test both the permitted exact plugin and malicious
-extra/symlink/modified-command cases against the real archived policy before a
-user deploys the revised sandbox. This is an integration specification, not a
-claim that the existing archived security policy already permits the connector.
-
+Sources: https://antigravity.google/docs/plugins and
+https://antigravity.google/docs/hooks (checked 2026-11-04).
 
 ## Descriptive project and model metadata
 
@@ -198,11 +191,22 @@ send, cancel, setup and other ordinary calls cannot retire or drain the active
 root. Hooks alone never select a root. Retired roots are never evicted or replayed:
 a binding accepts at most 256 retirements during one exact native-host lifetime,
 then refuses further transitions before draining; the active root still works.
-Restarting only MCP does not reset this bound. The pinned CLI 1.4.7 isolated
-qualification below now verifies actual `/compact` continuity and `/new` root
-rotation; authenticated user-environment wakeup acceptance remains separate.
+Restarting only MCP does not reset this bound. Historical pinned CLI 1.4.7 isolated observations of `/compact` and `/new` are
+recorded in issue #8; they are not a current-candidate integration result.
 
 Creating a strict binding handle or observing native hooks does not by itself
 disable the legacy loader. Only a verified strict transport admission commits
 `strict_admission_required`; subsequent legacy operations, including already-open
 handles, then fail closed. Waiter consumption cannot activate this marker.
+
+
+## Current acceptance and later integration
+
+At the owner's direction on 2026-11-04, issue #8 is accepted through implemented
+functionality, focused unit tests, independent review and the unit/syntax CI.
+The deleted heavyweight suites are not restored. Real-machine validation is a
+separate later step on the owner's computer: native install/update/load, URL
+setup/admin approval, automatic idle/busy arrival and re-arm, explicit read/ACK,
+restart/container recreation and simultaneous sessions. These checks are not
+claimed as passed and are no longer prerequisites for accepting this issue.
+Runtime capability and permission limits described above remain in force.

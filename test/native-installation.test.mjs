@@ -4,14 +4,14 @@ import { mkdtempSync, rmSync, cpSync, mkdirSync, readFileSync, writeFileSync, re
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inspectNativeInstallation, supportedNativeRuntime, nativeInstallationError } from '../src/native-installation.mjs';
+import { inspectNativeInstallation, supportedNativeRuntime, nativeInstallationError, NATIVE_RUNTIME_FILES } from '../src/native-installation.mjs';
 const source = fileURLToPath(new URL('../', import.meta.url));
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'agy-installation-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const pkg = join(root, 'node_modules', '@matuto-ai', 'antigravity-psst-connector');
   mkdirSync(pkg, { recursive: true });
-  for (const path of ['package.json', 'plugin.json', 'mcp_config.json', 'hooks.json', 'bin', 'skills', 'vendor']) {
+  for (const path of ['package.json', 'plugin.json', 'mcp_config.json', 'hooks.json', 'bin', 'skills', 'vendor', 'src']) {
     cpSync(join(source, path), join(pkg, path), { recursive: true });
   }
   return { root, pkg };
@@ -98,4 +98,34 @@ test('PATH lookup skips nonexecutables and resolves executable symlinks without 
   writeFileSync(join(second,'launcher'),'#!/bin/sh\nexit 99\n',{mode:0o700});symlinkSync(join(second,'launcher'),join(second,'agy'));
   const result=inspectNativeInstallation(f.pkg,{home:f.root,env:{PATH:`${first}:${second}`}});
   assert.equal(result.launcher.path,join(second,'agy'));assert.equal(result.launcher.resolved_path,join(second,'launcher'));
+});
+
+
+test('doctor rejects every missing native runtime dependency before suggesting import', t => {
+  const f = fixture(t);
+  for (const file of NATIVE_RUNTIME_FILES) {
+    const path = join(f.pkg, file), content = readFileSync(path);
+    rmSync(path);
+    assert.throws(() => inspectNativeInstallation(f.pkg, { home: f.root }), /native_plugin_package_invalid/, file);
+    writeFileSync(path, content);
+  }
+  rmSync(join(f.pkg, 'src'), { recursive: true });
+  assert.throws(() => inspectNativeInstallation(f.pkg, { home: f.root }), /native_plugin_package_invalid/);
+});
+
+test('doctor rejects disabled, missing or modified hooks and additional MCP commands', t => {
+  const f = fixture(t), hookPath = join(f.pkg, 'hooks.json'), mcpPath = join(f.pkg, 'mcp_config.json');
+  const hooks = JSON.parse(readFileSync(hookPath)), mcp = JSON.parse(readFileSync(mcpPath));
+  for (const changed of [{}, { ...hooks, extra: {} },
+    { 'psst-native-binding': { ...hooks['psst-native-binding'], enabled: false } },
+    { 'psst-native-binding': { ...hooks['psst-native-binding'], PreInvocation: [] } }]) {
+    writeFileSync(hookPath, JSON.stringify(changed));
+    assert.throws(() => inspectNativeInstallation(f.pkg, { home: f.root }), /native_plugin_package_invalid/);
+  }
+  writeFileSync(hookPath, JSON.stringify(hooks));
+  for (const changed of [{ mcpServers: { ...mcp.mcpServers, other: { command: 'unreviewed' } } },
+    { mcpServers: { psst: { ...mcp.mcpServers.psst, env: { EXAMPLE: 'unexpected' } } } }]) {
+    writeFileSync(mcpPath, JSON.stringify(changed));
+    assert.throws(() => inspectNativeInstallation(f.pkg, { home: f.root }), /native_plugin_package_invalid/);
+  }
 });
