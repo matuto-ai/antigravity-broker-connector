@@ -1,4 +1,7 @@
-# 0.6.0 — Unreleased
+# 0.7.0 — Unreleased
+
+- Version-only preparation for the owner-selected 0.7.0 delivery. Package and native plugin metadata agree; publication remains a separate action.
+- Include the merged explicit `/psst-reauthorize` workflow and approval/attachment status distinction from #29.
 
 ## Unreleased native lifecycle fixes (issue #8)
 

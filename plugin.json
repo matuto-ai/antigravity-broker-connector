@@ -1,5 +1,5 @@
 {
   "name": "psst-native",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Psst URL-only setup and native conversation messaging; automatic native wakeup remains experimental."
 }
