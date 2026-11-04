@@ -1,6 +1,6 @@
 # Package and repository migration (planned at 0.6.0)
 
-The current delivery target is **0.7.0**, superseding the unreleased 0.6.0
+This historical migration targeted **0.7.0**, superseding the unreleased 0.6.0
 plan. This filename is retained for existing links. No publication is claimed.
 
 This is a prepared, unpublished migration. Old package `@matuto-ai/antigravity-broker-connector` remains available. No release, deprecation, repository rename, account permission or user installation is performed by this change.

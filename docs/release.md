@@ -1,6 +1,6 @@
 # Publish and install
 
-For 0.7.0, follow the [package/repository migration checklist](migration-0.6.0.md) first: rename the repository before releasing and configure the new package's trusted publisher. Do not publish the same name/version twice during bootstrap.
+Version 0.8.0 is an unreleased candidate using the existing package and trusted publisher. The [package/repository migration checklist](migration-0.6.0.md) records the earlier naming transition. Do not publish the same name/version twice.
 
 This branch prepares an installable package and a release-triggered npm workflow;
 it does not assert that npm already hosts the package.
@@ -13,15 +13,16 @@ it does not assert that npm already hosts the package.
    `antigravity-psst-connector`, workflow `npm-publish.yml`. This is an account
    security configuration performed by the maintainer, not by this code change.
 4. Set package version and create a GitHub release whose tag is exactly
-   `v<package.json version>` on the reviewed commit (`v0.7.0` for this release).
+   `v<package.json version>` on the reviewed commit (`v0.8.0` for this release).
 5. The workflow records the exact commit/tree, builds one tarball and verifies
    its installed bytes. The unit suite runs against the source checkout. The
    workflow then publishes that same verified tarball with provenance; it never
    repacks source before publication.
-6. The final read-only registry check must confirm name, version, tarball integrity
-   and `latest` match the verified artifact before the workflow reports success.
-   A missing or divergent publication fails visibly, without republishing or
-   changing tags automatically.
+6. Publication confirmation is manual, performed by the owner. CI ends with
+   npm publish and does not query the registry afterward. A real npm publish
+   failure still fails the workflow. Registry processing may delay visibility:
+   do not republish an existing version or rerun publication because a previous
+   post-publication check failed.
 
 The workflow follows the user's existing release/OIDC pattern, with test and
 version gates added. It does not need a long-lived NPM_TOKEN in source or workflow.
@@ -30,9 +31,9 @@ back to another identity. Git/packed-tarball installation remains available even
 before npm setup. Release publication, credential creation, and broker enrollment
 are distinct from preparing or merging connector code.
 
-## Minor release 0.7.0
+## Minor release 0.8.0
 
-The intended GitHub release tag is `v0.7.0`, matching `package.json`.
+The intended GitHub release tag is `v0.8.0`, matching `package.json`.
 Use the existing release-triggered Trusted Publishing workflow and normal npm
 `latest` tag; no prerelease workflow or account configuration is changed here.
 Review the [changelog](../CHANGELOG.md) before publishing. The native pilot is

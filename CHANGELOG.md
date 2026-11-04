@@ -1,4 +1,9 @@
-# 0.7.0 — Unreleased
+# 0.8.0 — Unreleased
+
+- Remove the release CI post-publication registry gate. Keep exact-artifact preparation, syntax/unit checks, version guards and npm publish; the owner confirms publication manually.
+- Prepare matching package and native plugin versions for 0.8.0. No release or publication is performed by this change.
+
+# 0.7.0
 
 - Version-only preparation for the owner-selected 0.7.0 delivery. Package and native plugin metadata agree; publication remains a separate action.
 - Include the merged explicit `/psst-reauthorize` workflow and approval/attachment status distinction from #29.

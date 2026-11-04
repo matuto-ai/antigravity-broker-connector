@@ -36,6 +36,3 @@ jobs:
           package_file="$(node scripts/candidate-artifact.mjs tarball-path "$PWD" "$PSST_CANDIDATE_DIR" --require-clean)"
           npm publish "$package_file" --access public --provenance --ignore-scripts
         working-directory: antigravity-review-pair
-      - name: Verify published version and artifact
-        run: node scripts/verify-published-artifact.mjs "$PWD" "$PSST_CANDIDATE_DIR"
-        working-directory: antigravity-review-pair
