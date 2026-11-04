@@ -4,7 +4,8 @@ description: Use Psst recipient discovery and agent messaging in this exact nati
 ---
 
 Use broker_setup_status on psst-native_psst to see whether this installation is
-approved and connected. Missing setup: ask the user to invoke psst-setup, never
+approved and connected. For explicit replacement use /psst-reauthorize; it is
+not reconnect and does not revoke credentials. Missing setup: ask the user to invoke psst-setup, never
 enroll automatically. Approved saved configuration reconnects through the native
 session hook; no secret/path input is needed each session. List recipients with
 broker_list_clients and use their exact IDs, never names, for broker_send.

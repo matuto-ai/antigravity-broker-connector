@@ -6,8 +6,8 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
  let generation=0,controller,busy=false,closed=false,status={state:'setup_needed'};
  const tasks=new Set();
  const alive=()=>!closed&&isAlive();
- const publicState=result=>({state:result.state,requestId:result.requestId??null,...(result.requestExpiresAt?{requestExpiresAt:result.requestExpiresAt}:{})});
- const publish=result=>{if(!alive())return status;status=publicState(result);onStatus(status);return status;};
+ const publicState=result=>({state:result.state,requestId:result.requestId??null,...(result.requestExpiresAt?{requestExpiresAt:result.requestExpiresAt}:{}),...(result.approval_state?{approval_state:result.approval_state}:{})});
+ const publish=result=>{if(!alive())return status;status=publicState({...result,...(['pending','attention_required','approved'].includes(result.state)&&result.requestId===status.requestId&&status.approval_state==='approved'?{approval_state:'approved'}:{})});onStatus(status);return status;};
  const options=p=>({brokerUrl:p.brokerUrl,directory:installation.directory,clientType:'antigravity-cli'});
  const current=(epoch,p)=>{if(!alive()||generation!==epoch||controller?.signal.aborted)return false;const pending=installation.pending(),selected=installation.selected();return generation===epoch&&!controller.signal.aborted&&alive()&&pending?.requestId===p.requestId&&(pending.cancelled===false||selected?.requestId===p.requestId);};
  async function apply(result,p,epoch){
@@ -16,6 +16,7 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
   if(result.state!=='approved')publish(result);
   if(['denied','expired','revoked'].includes(result.state)){installation.cancel(publicState(result));return;}
   if(result.state==='approved'){
+   publish({...result,state:'pending',approval_state:'approved'});
    const candidate=await activate.prepare(result.connectionFile);
    let staged,selected=false;
    try{if(!current(epoch,p))throw Error('approval_cancelled');staged=await activate.commit(candidate);if(!current(epoch,p))throw Error('approval_cancelled');installation.commit({...result,previousRevision:p.previousRevision});selected=true;if(current(epoch,p))publish(result);try{await staged?.finalize?.();}catch{/* Old cleanup cannot discard a committed candidate. */}}
@@ -50,7 +51,12 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
     brokerUrl=origin(brokerUrl);const old=installation.selected(),prior=installation.pending();
     const existing=await api.readApprovalState({brokerUrl,directory:installation.directory,clientType:'antigravity-cli'});
     if(!alive()||generation!==startedGeneration)return status;
-    const replacing=existing&&existing.state!=='pending';
+    // An approved candidate that has not been selected is still the same delivery.
+    // Retry attachment rather than rotating it on a repeated slash command.
+    const attaching=existing?.state==='approved'&&prior&&!prior.cancelled
+      &&(prior.requestId===existing.requestId
+        ||(prior.requestId===null&&(existing.parentRequestId??null)===(prior.replacesRequestId??null)));
+    const replacing=existing&&existing.state!=='pending'&&!attaching;
     if(prior&&!prior.cancelled&&prior.brokerUrl!==brokerUrl)throw Error('cancel_pending_setup_first');
     const p=installation.beginPending({brokerUrl,previousRevision:old?.revision??null,...(replacing?{replacesRequestId:existing.requestId}:{})});
     onBegin();
