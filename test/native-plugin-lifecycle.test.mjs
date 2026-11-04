@@ -197,3 +197,34 @@ test('invalid setup leaves an explicitly disconnected conversation disabled', as
  assert.equal(status.connected,false);assert.equal(status.waiter_command,undefined);assert.equal(f.calls.length,1);
  assert.equal(f.installation.sessionDisabled(id),true);
 });
+
+test('reauthorization exposes only public origin and distinguishes pending replacement from old transport', async t => {
+ let saved,posts=0;const requestId=randomUUID();
+ const f=await fixture(t,{approvalApi:{readApprovalState:()=>saved,beginApproval:options=>{
+  posts++;assert.equal(options.brokerUrl,'https://broker.example');saved={state:'pending',requestId};return saved;
+ },pollApproval:()=>saved}});
+ const id=randomUUID();const initial=await f.call(id);
+ assert.equal(initial.broker_url,'https://broker.example');assert.equal(initial.request_connection_state,'connected');
+ await f.call(id,'broker_setup',{broker_url:initial.broker_url});
+ const pending=await f.call(id);
+ assert.equal(pending.connected,true);assert.equal(pending.request_connection_state,'pending');assert.equal(pending.requestId,requestId);
+ assert.equal(pending.waiter_command,approvalWaiterCommand(f.server.directory));
+ await f.call(id,'broker_setup',{broker_url:pending.broker_url});
+ assert.equal((await f.call(id)).requestId,requestId);assert.equal(posts,2); // Helper deduplicates the same candidate.
+ assert.equal(f.installation.selected().requestId,f.requestId);
+ await f.call(id,'broker_cancel_setup');
+});
+
+test('approved but failed replacement attachment is not reported as connected even with old working transport', async t => {
+ let saved,result;const f=await fixture(t,{failure:count=>{if(count>1)throw Error('attachment_failed');},
+  approvalApi:{readApprovalState:()=>saved,beginApproval:()=>saved=result,pollApproval:()=>saved}});
+ const id=randomUUID();await f.call(id);const old=f.installation.selected();
+ const connectionFile=join(f.root,'replacement.json'),credentialId='enrolled-'+randomUUID();
+ f.configs.set(connectionFile,{...f.configs.get(f.connectionFile),enrollment:{credentialId}});
+ result={state:'approved',requestId:randomUUID(),connectionFile,credentialId};
+ await f.call(id,'broker_setup',{broker_url:'https://broker.example'});
+ await new Promise(resolve=>setImmediate(resolve));const status=await f.call(id);
+ assert.equal(status.state,'attention_required');assert.equal(status.connected,true);
+ assert.equal(status.request_connection_state,'approved_not_connected');assert.equal(status.requestId,result.requestId);
+ assert.deepEqual(f.installation.selected(),old);
+});

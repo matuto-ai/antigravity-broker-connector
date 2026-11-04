@@ -242,3 +242,35 @@ test('expired request deadline cannot override an authoritative terminal result 
   if(state==='approved')assert.equal(attempts,2);manager.close();
  }
 });
+
+test('repeated replacement after failed approved attachment keeps the same candidate and old selection', async t => {
+ const f=fixture(t),first=approved(f),next=approved(f);let saved=first,creates=0,attempts=0;
+ f.installation.beginPending({brokerUrl:'https://broker.example',requestId:first.requestId,previousRevision:null});
+ const old=f.installation.commit({...first,previousRevision:null});
+ const manager=createApprovalManager({installation:f.installation,
+  api:{readApprovalState:()=>saved,beginApproval:options=>{
+   if(options.replaceRequestId){creates++;assert.equal(options.replaceRequestId,first.requestId);saved=next;}
+   return saved;
+  },pollApproval:()=>saved},
+  activate:{prepare:async()=>{if(++attempts===1)throw Error('attach_failed');return{close:async()=>{}};},commit:async()=>{}}});
+ await manager.begin('https://broker.example');await manager.done;
+ assert.equal(manager.status.state,'attention_required');assert.equal(manager.status.approval_state,'approved');
+ assert.equal(f.installation.selected().revision,old.revision);
+ await manager.begin('https://broker.example');await manager.done;
+ assert.equal(creates,1);assert.equal(attempts,2);assert.equal(f.installation.selected().requestId,next.requestId);
+ assert.equal(manager.status.state,'approved');manager.close();
+});
+
+test('explicit replacement of stale approved or revoked authorization does not revoke or delete old selection', async t => {
+ for(const state of ['approved','revoked']){
+  const f=fixture(t),first=approved(f),next={state:'pending',requestId:randomUUID()};let manager,creates=0;
+  f.installation.beginPending({brokerUrl:'https://broker.example',requestId:first.requestId,previousRevision:null});
+  const old=f.installation.commit({...first,previousRevision:null});
+  manager=createApprovalManager({installation:f.installation,
+   api:{readApprovalState:()=>({...first,state}),beginApproval:options=>{creates++;assert.equal(options.replaceRequestId,first.requestId);return next;}},
+   activate:{},sleep:async()=>manager.cancel()});
+  await manager.begin('https://broker.example');await manager.done;
+  assert.equal(creates,1);assert.deepEqual(f.installation.selected(),old);assert.equal(f.installation.pending().requestId,next.requestId);
+  manager.close();
+ }
+});

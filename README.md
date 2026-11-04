@@ -6,6 +6,9 @@
 
 Install the packaged native plugin once through Antigravity's normal `/plugin`
 manager, then invoke `/psst-setup` and provide **only the broker HTTPS URL**.
+For replacement authorization invoke `/psst-reauthorize`, confirm the saved broker
+origin, and approve the displayed new request in Psst admin. This is a model-driven
+skill, not a token-free command. Replacement does not revoke old credentials.
 Approve the displayed request in the broker admin UI. Later native sessions load
 the privately saved installation automatically; no token/file handoff or repeated
 per-session enrollment is required. [Setup and exact persistence paths](docs/setup.md).

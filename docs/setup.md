@@ -210,3 +210,57 @@ setup/admin approval, automatic idle/busy arrival and re-arm, explicit read/ACK,
 restart/container recreation and simultaneous sessions. These checks are not
 claimed as passed and are no longer prerequisites for accepting this issue.
 Runtime capability and permission limits described above remain in force.
+
+## Explicit replacement authorization
+
+Invoke `/psst-reauthorize` → confirm the displayed HTTPS broker origin → receive
+one public request ID → approve it in Psst admin → wait for connection. The skill
+reads `broker_setup_status.broker_url` to reuse the configured origin and calls
+`broker_setup` with only `broker_url`; it never invents a `replace` argument.
+
+`request_connection_state` distinguishes `pending`, `approved_not_connected`,
+`connected` and `not_connected`. Approval can succeed before attachment succeeds.
+The existing `connected` field describes the current transport, which can still
+be the old authorization while a replacement is pending. Saved configuration
+alone does not prove access still works: revoked/expired authorization needs
+attention. Keep the current credential and old journals until the candidate
+attaches and wins the selection-revision guard. New credentials never adopt or
+replay old unread messages. No files or locks are deleted.
+
+Repeated commands join the pending candidate, including one approved but not yet
+attached. Failed attachment retains that candidate for an explicit retry. A
+locally cancelled observer does not revoke authorization or cancel another native
+host's candidate; an explicit command can resume it. Uncertain responses and
+restart use the existing durable request/parent lineage and revision guards.
+Arm the native approval waiter once and, on completion, read status once and
+re-arm the inbox waiter after connection. Do not poll with model turns.
+
+Reauthorization requests access. Reconnect restores transport using saved access
+and never enrolls. Revoke removes access through a separate human action in Psst
+admin. Requesting or cancelling replacement does **not** revoke the old credential;
+do not revoke working access as a prerequisite. Even after replacement connects,
+manual revocation is separate.
+
+### Model-driven slash dispatch and owner decision
+
+This candidate exposes a **prompt-based skill**, not token-free native dispatch.
+The documented CLI skill contract converts a skill to `/<skill-name>` and has the
+agent follow its instructions. It does not expose a plugin slash callback. The
+current web hook reference also describes `PreInvocation.terminationBehavior`
+with injected tools, which is a possible newer-host route, not a verified
+capability of the supported CLI 1.4.7. Its inspected hook schema contains only
+`injectSteps` for `PreInvocationHookResult`, whereas `PostInvocationHookResult`
+contains `terminationBehavior`; terminating after invocation already spends a
+model turn. Hook injection is not evidence of model-free execution or of a safe
+confirmation/result/waiter lifecycle.
+
+On 2026-11-04 the owner explicitly accepted a model-driven slash command for
+issue #29 because it simplifies use. Token-free execution is not claimed. Do not
+silently change the host or use a shell
+wrapper, permission bypass, extra MCP server or direct credential access as a
+substitute. A newer supported-host route needs its exact dispatch/termination,
+normal confirmation, ownership and completion behavior established first.
+
+Sources checked 2026-11-04: [skills and slash conversion](https://antigravity.google/docs/skills),
+[plugin components](https://antigravity.google/docs/build-plugins/), and
+[PreInvocation contract](https://antigravity.google/docs/hooks#preinvocation).
