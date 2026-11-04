@@ -39,7 +39,7 @@ openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 -subj /CN=offline-psst
 # Publicly readable only within this disposable fixture staging directory; never user keys.
 chmod 755 "$tmp/tls" "$tmp/psst" "$tmp/psst/src" "$tmp/psst/scripts"
 chmod 644 "$tmp/tls/key.pem" "$tmp/tls/cert.pem"
-PSST_APPROVAL_FIXTURE_BROKER_ROOT="$tmp/psst" node --test "$fixture/approval-broker-fixture.test.mjs" "$fixture/permission-state.test.mjs" "$fixture/waiter-authorization.test.mjs" "$fixture/waiter-boundary.test.mjs" "$fixture/setup-provider-step.test.mjs" "$fixture/waiter-provider-step.test.mjs" "$fixture/presence-provider-step.test.mjs" "$fixture/message-provider-step.test.mjs" "$fixture/actual-provider-step.test.mjs" "$fixture/actual-compact-state.test.mjs"
+PSST_APPROVAL_FIXTURE_CONNECTOR_ROOT="$repo" PSST_APPROVAL_FIXTURE_BROKER_ROOT="$tmp/psst" node --test "$fixture/approval-broker-fixture.test.mjs" "$fixture/permission-state.test.mjs" "$fixture/waiter-authorization.test.mjs" "$fixture/waiter-boundary.test.mjs" "$fixture/setup-provider-step.test.mjs" "$fixture/waiter-provider-step.test.mjs" "$fixture/presence-provider-step.test.mjs" "$fixture/message-provider-step.test.mjs" "$fixture/actual-provider-step.test.mjs" "$fixture/actual-compact-state.test.mjs"
 mounts=(--mount "type=bind,src=$tmp/antigravity,dst=/native/antigravity,readonly")
 for dir in src bin vendor; do
   [[ -d "$repo/$dir" && ! -L "$repo/$dir" ]] || exit 1
@@ -56,8 +56,9 @@ case "${2:-all}" in
  baseline) modes=(root compact new presence messages);;
  automatic) modes=(idle setup busy);;
  authorized-once) modes=(idle); extra_args=(--confirm-waiter-once);;
+ authorized-setup-remainder) modes=(setup); extra_args=(--confirm-remaining-setup);;
  authorized-matrix) modes=(idle setup busy); extra_args=(--confirm-authorized-matrix);;
- *) echo 'expected all, baseline, automatic or explicitly authorized-once/authorized-matrix native qualification group' >&2; exit 2;;
+ *) echo 'expected all, baseline, automatic or explicitly authorized-once/authorized-matrix/authorized-setup-remainder native qualification group' >&2; exit 2;;
 esac
 for mode in "${modes[@]}"; do
  timeout --kill-after=5s 50s docker run --rm --name "$name" --network none --user 1000:1000 --read-only --memory 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m "${mounts[@]}" -e HOME=/tmp/proof-home "$image" node /fixture/actual-worker.mjs "$mode" "${extra_args[@]}" || status=1

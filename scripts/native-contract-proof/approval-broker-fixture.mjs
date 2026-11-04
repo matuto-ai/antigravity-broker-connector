@@ -32,7 +32,7 @@ function sessionCookie(response) {
 /** Real URL-only approval path, with no token bundle or selected installation.
  * approvedEntry is an internal peer-fixture capability, never proof-log output.
  */
-export async function prepareApprovalBrokerFixture({root,home,brokerRoot,tlsDirectory}) {
+export async function prepareApprovalBrokerFixture({root,home,brokerRoot,tlsDirectory,requireRegistrationV2=false}) {
   for(const path of [root,home,brokerRoot,tlsDirectory])assert(typeof path==='string'&&resolve(path)===path,'absolute_fixture_path_required');
   privateDirectory(root);privateDirectory(home);
   const data=join(root,'approval-broker');
@@ -54,7 +54,10 @@ export async function prepareApprovalBrokerFixture({root,home,brokerRoot,tlsDire
     try{if(app?.server.listening)await app.close();}finally{store?.close();}
   }
   try {
-    store=await BrokerStore.open({path:join(data,'broker.sqlite'),requireRegistrationV2:true});
+    // URL-only approval bundles use the supported v1 default. v2 enforcement is
+    // an operator rollout choice, separately exercised by the strict fixtures.
+    assert.equal(typeof requireRegistrationV2,'boolean');
+    store=await BrokerStore.open({path:join(data,'broker.sqlite'),requireRegistrationV2});
     const approval=await ApprovalService.create({store,scope:'native-proof',principal:'offline-fixture-owner'});
     const credentialFile=join(data,'credentials.json');
     writeFileSync(credentialFile,'{"credentials":[]}\n',{mode:0o600,flag:'wx'});

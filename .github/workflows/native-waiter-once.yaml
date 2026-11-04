@@ -1,4 +1,4 @@
-name: Authorized isolated waiter matrix
+name: Authorized isolated setup remainder
 on:
   push:
     branches: ['feat/complete-native-qualification']
@@ -6,9 +6,10 @@ permissions:
   contents: read
 jobs:
   native_waiter_once:
-    # The single branch transition approved on 2026-11-04. Not PR events,
-    # future pushes, manual runs or reruns. The fixed cases spend at most 2/3/2 one-time confirmations, seven total.
-    if: github.repository == 'matuto-ai/antigravity-psst-connector' && github.event_name == 'push' && github.ref == 'refs/heads/feat/complete-native-qualification' && github.event.before == '0de5a57c24b15460eb9a9acc0af06438b0675c71' && github.run_attempt == 1
+    # Remainder of the seven one-time executions approved on 2026-11-04.
+    # Run 41795315755 spent idle=2, setup=1, busy=2. Only setup=2 remain.
+    # No re-arm request, idle/busy repeat, PR event, future push or rerun.
+    if: github.repository == 'matuto-ai/antigravity-psst-connector' && github.event_name == 'push' && github.ref == 'refs/heads/feat/complete-native-qualification' && github.event.before == '073499521c0dc2493bd1f240abb4a5d0eea18e17' && github.run_attempt == 1
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -25,6 +26,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24.19.0'
-      - name: Run the bounded authorized isolated matrix
-        run: bash scripts/native-contract-proof/run-actual.sh "$PWD" authorized-matrix
+      - name: Run only the two unused setup executions
+        run: bash scripts/native-contract-proof/run-actual.sh "$PWD" authorized-setup-remainder
         working-directory: antigravity-review-pair

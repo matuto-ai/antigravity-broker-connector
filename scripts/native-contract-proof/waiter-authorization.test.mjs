@@ -26,3 +26,10 @@ test('each approval requires its exact current phase and cannot replay or exceed
  assert.equal(phase(plan('setup','--confirm-authorized-matrix'),0,setup),'approval');
  setup.approvalGranted=true;assert.equal(phase(plan('setup','--confirm-authorized-matrix'),0,setup),null);
 });
+
+test('remaining setup grant cannot repeat idle/busy or authorize a third setup command',()=>{
+ const p=plan('setup','--confirm-remaining-setup');assert.deepEqual(p,['approval','inbox']);
+ for(const mode of ['idle','busy','root'])assert.throws(()=>plan(mode,'--confirm-remaining-setup'));
+ const s=input('setup');assert.equal(phase(p,1,s),'inbox');
+ s.inbox.completed=1;s.messages.completed=6;s.rearm.sent=1;s.idleSeeded=true;assert.equal(phase(p,2,s),null);
+});

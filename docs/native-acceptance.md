@@ -143,16 +143,19 @@ cleanup. Those remaining acceptance gates keep issue #8 open.
 
 ## Complete issue-8 candidate
 
-See [the original acceptance checklist](issue-8-acceptance.md) for the complete
-remaining scope. The candidate adds `idle`, `busy` and `setup` modes to the isolated
-suite, with real production one-use waiter permits and real form-admin approval.
-Until their exact-head CI passes, these modes are unverified tests, not evidence
-that automatic native arrival works. Even passing synthetic-provider runs do not
-replace the original authenticated owner-host acceptance or establish a native
-conversation-deletion hook.
+See [the original acceptance checklist](issue-8-acceptance.md) for remaining
+scope and the exact run ledger. The isolated official CLI 1.4.7 `idle` and `busy`
+cases passed at `0734995`: automatic arrival, full message read, exact-ID ACK,
+one re-arm, unchanged permissions and owned-process cleanup. Their provider was
+synthetic; they do not prove authenticated owner-host behavior.
 
-The first explicitly authorized one-shot waiter observation is recorded in the
-[issue-8 checklist](issue-8-acceptance.md#one-authorized-execution-2026-11-04).
-It establishes a real running waiter and stopped native model turn, not message
-arrival. The observed renderer/lifecycle mismatch has a focused fixture fix;
-its corrected native run and the remaining setup/busy cases are still pending.
+The same matrix's setup failed after approval because its broker fixture forced
+v2 while the real URL-only helper writes a documented v1-default bundle. The
+fixture now uses the broker's supported default. Real TLS regression covers both
+successful default activation and rejection under explicit v2 enforcement.
+
+Five of seven authorized executions were used. The two remaining setup
+executions are limited to approval and first inbox delivery, with a distinct
+first-delivery-only result and no re-arm request. Full setup/re-arm acceptance,
+the actual supported owner launcher/upgrade and authenticated host checks remain
+open. No conversation-deletion hook, release or 1.0 readiness is implied.

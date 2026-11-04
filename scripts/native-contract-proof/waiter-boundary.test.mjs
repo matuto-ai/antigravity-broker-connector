@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {stoppedNativeWaiter} from './waiter-boundary.mjs';
+import {stoppedNativeWaiter,completedNativeDelivery} from './waiter-boundary.mjs';
 const identity={conversationId:'fixture-root',hostPid:18,hostStart:'4454'};
 const context={...identity,environmentConversationId:identity.conversationId,denied:false};
 const command={...context,event:'PreToolUse',toolName:'run_command'};
@@ -15,4 +15,10 @@ test('unknown, foreign, stale or resumed native turns cannot seed external arriv
   assert.equal(stoppedNativeWaiter([{...command,[key]:'wrong'},stop],identity),false);
   assert.equal(stoppedNativeWaiter([command,{...stop,[key]:'wrong'}],identity),false);
  }
+});
+
+test('bounded first delivery ends only after native idle stop following final receive',()=>{
+ const receive={...context,event:'PreToolUse',toolName:'call_mcp_tool',tool:'broker_receive'},done={...stop,fullyIdle:true};
+ assert.equal(completedNativeDelivery([command,stop,receive,done],identity),true);
+ for(const hooks of [[receive,stop],[receive,done,command],[done,receive],[command,done],[{...receive,tool:'broker_acknowledge'},done],[receive,{...done,denied:true}],[receive,done,{...context,event:'PreInvocation'}]])assert.equal(completedNativeDelivery(hooks,identity),false);
 });
