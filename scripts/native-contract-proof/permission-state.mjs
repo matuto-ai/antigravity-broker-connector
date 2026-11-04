@@ -28,5 +28,7 @@ export function exactWaiterPermission(screen,{expectedCommand}={}) {
  const footerWords=new Set('Navigate Select Confirm Run run command edit Edit enter ctrl e g esc Esc cancel to fixture'.split(' '));
  const knownFooter=footer.length>0&&footer.length<160&&/^[A-Za-z ↑↓/·+.:-]+$/.test(footer)&&
   (footer.match(/[A-Za-z]+/g)??[]).every(word=>footerWords.has(word));
- return {recognized:bounded&&unique&&exactCommand&&onceFocused&&knownChoices&&knownFooter,header:header>=0,question:question>header,exactCommand,onceFocused,knownChoices,knownFooter};
+ const safeWords=new Set("Yes No run command and always allow in this conversation for commands that start with Persist to settings json cancel Navigate Select Confirm enter ctrl e g esc Esc edit Edit fixture usr local bin node plugin psst-antigravity-native mjs wait 1 2 3 4".split(' '));
+ const controlShape=options.join('\n').replace(/[A-Za-z0-9_-]+/g,word=>safeWords.has(word)?word:'?').slice(0,2048);
+ return {controlShape,recognized:bounded&&unique&&exactCommand&&onceFocused&&knownChoices&&knownFooter,header:header>=0,question:question>header,exactCommand,onceFocused,knownChoices,knownFooter};
 }
