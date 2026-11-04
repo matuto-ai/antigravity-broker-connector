@@ -7,6 +7,9 @@
   authorization/conversation; notify through the existing native status waiter.
 - Keep replacement approval observable while the previous connection works.
 - Reject incomplete runtime files and altered hook/MCP manifests in doctor.
+- Fence late startup results only after a valid explicit intent is saved; invalid
+  setup leaves working startup and explicit disconnect unchanged.
+- Commit per-conversation disconnect/setup suppression so they survive restart.
 - Validate through focused unit tests; owner-machine integration is deferred.
 
 - Admit verified native root transitions only through setup-status/connect after the first root, with a fail-closed 256-retirement bound, transport root/self IDs and exact hook permits; drain old work and preserve old journals without replay into the new mailbox. Child IDs and retired roots cannot select the owner.

@@ -176,3 +176,24 @@ test('late successful startup cannot replace or publish over a newer approved se
   assert.equal(f.sessions.length, 2); assert.equal(f.sessions[0].closes.length, 0);
   assert.deepEqual(f.sessions[1].closes, [{ closeSession: false }]);
 });
+
+test('invalid setup or failed initial read cannot cancel a valid saved startup', async t => {
+ for(const initialReadFails of [false,true]){
+  const entered=barrier(),finish=barrier();
+  const f=await fixture(t,{failure:async()=>{entered.resolve();await finish.promise;},
+   approvalApi:{readApprovalState:()=>{throw Error('initial_read_failed');}}});
+  const id=randomUUID(),starting=f.call(id);await entered.promise;
+  await assert.rejects(f.call(id,'broker_setup',{broker_url:initialReadFails?'https://broker.example':'not a URL'}),initialReadFails?/initial_read_failed/:/https_broker_url_required/);
+  finish.resolve();const status=await starting;
+  assert.equal(status.connected,true);assert.equal(status.state,'approved');assert.equal(status.requestId,f.requestId);
+  assert.equal(f.sessions[0].closes.length,0);assert.equal(f.calls.length,1);
+ }
+});
+
+test('invalid setup leaves an explicitly disconnected conversation disabled', async t => {
+ const f=await fixture(t),id=randomUUID();await f.call(id);await f.call(id,'broker_disconnect');
+ await assert.rejects(f.call(id,'broker_setup',{broker_url:'not a URL'}),/https_broker_url_required/);
+ f.advance(600000);const status=await f.call(id);
+ assert.equal(status.connected,false);assert.equal(status.waiter_command,undefined);assert.equal(f.calls.length,1);
+ assert.equal(f.installation.sessionDisabled(id),true);
+});

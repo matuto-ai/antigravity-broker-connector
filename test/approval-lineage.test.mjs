@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readApprovalParent, savePrivate } from '../src/installation.mjs';
+import { readApprovalParent, savePrivate, openInstallation } from '../src/installation.mjs';
 
 test('private candidate lineage reads only the exact request parent, never its secret state', t => {
  const directory=mkdtempSync(join(tmpdir(),'approval-lineage-'));
@@ -24,4 +24,18 @@ test('private candidate lineage reads only the exact request parent, never its s
  savePrivate(path,attempt);const linked=join(directory,'linked');renameSync(join(directory,'approvals'),linked);
  symlinkSync(linked,join(directory,'approvals'));
  assert.throws(()=>readApprovalParent(options),/private_installation_required/);
+});
+
+
+test('per-conversation disconnect and setup suppression survive opening a new store', t => {
+ const directory=mkdtempSync(join(tmpdir(),'installation-flags-'));
+ t.after(()=>rmSync(directory,{recursive:true,force:true}));
+ const first=openInstallation(directory),a=randomUUID(),b=randomUUID();
+ first.setSessionDisabled(a,true);first.suppressSetup(a,true);
+ const reopened=openInstallation(directory);
+ assert.equal(reopened.sessionDisabled(a),true);assert.equal(reopened.setupSuppressed(a),true);
+ assert.equal(reopened.sessionDisabled(b),false);assert.equal(reopened.setupSuppressed(b),false);
+ reopened.setSessionDisabled(a,false);reopened.suppressSetup(a,false);
+ assert.equal(first.sessionDisabled(a),false);assert.equal(first.setupSuppressed(a),false);
+ assert.equal(first.selected(),null);assert.equal(first.pending(),null);
 });

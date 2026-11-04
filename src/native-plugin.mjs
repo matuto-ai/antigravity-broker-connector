@@ -123,7 +123,15 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
     return {async rollback(){if(epoch===stagedEpoch&&session===candidate){session=old;disabled=oldDisabled;reconnectAt=oldReconnectAt;epoch++;state();}else{try{await old?.close();}catch{}}},async finalize(){try{await old?.close();}catch{/* Selected new session remains usable despite old cleanup failure. */}}};
   }
   async function attachApproved(candidate){const staged=await stageApproved(candidate);await staged.finalize();}
-  function newManager(){const generation=rootGeneration;return createApprovalManager({installation,api,isAlive:()=>!closed&&!transitioning&&generation===rootGeneration&&isHostAlive(),onStatus:status=>{if(generation===rootGeneration&&!transitioning)savePrivate(join(directory,'approval.json'),status);},activate:{prepare:prepareApproved,commit:stageApproved}});}
+  function newManager(){const generation=rootGeneration;return createApprovalManager({installation,api,isAlive:()=>!closed&&!transitioning&&generation===rootGeneration&&isHostAlive(),onStatus:status=>{if(generation===rootGeneration&&!transitioning)savePrivate(join(directory,'approval.json'),status);},
+    onBegin:()=>{
+      // Only a validated, durably reserved explicit intent supersedes startup.
+      // Invalid input or a failed initial read leaves the working attempt alone.
+      const conversationId=binding.assertHost().conversation;
+      if(!currentRoot(conversationId,generation))throw Error('native_root_changed');
+      installation.suppressSetup(conversationId,false);installation.setSessionDisabled(conversationId,false);
+      setupGeneration++;approvalResumed=true;disabled=false;reconnectAt=0;state();recoveryBlocked=false;recoverySource=undefined;
+    },activate:{prepare:prepareApproved,commit:stageApproved}});}
   manager=newManager();
   let attemptedRevision,approvalResumed=false,ticking=false,recoverySource,reconnectAt=0,reconnectFailures=0;
   function tick(){if(ticking||closed||transitioning)return tickPromise??Promise.resolve();tickPromise=runTick();return tickPromise;}
@@ -163,7 +171,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
   async function execute(def,verified,context){
     if(closed||!isHostAlive())throw Error('native_host_unavailable');
     if(!session&&!['broker_setup','broker_setup_status','broker_connect','broker_disconnect','broker_cancel_setup'].includes(def.name))await tick();
-    if(def.name==='broker_setup'){setupGeneration++;approvalResumed=true;installation.suppressSetup(verified.conversationId,false);installation.setSessionDisabled(verified.conversationId,false);disabled=false;state();const wasRecoveryBlocked=recoveryBlocked;recoveryBlocked=false;recoverySource=undefined;try{const status=await manager.begin(verified.args.broker_url);return {...status,waiter_command:approvalWaiterCommand(directory),automatic_delivery_certified:false};}catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;}}
+    if(def.name==='broker_setup'){const wasRecoveryBlocked=recoveryBlocked;try{const status=await manager.begin(verified.args.broker_url);return {...status,waiter_command:approvalWaiterCommand(directory),automatic_delivery_certified:false};}catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;}}
     if(def.name==='broker_setup_status'){await tick();const waiting=['pending','reconnecting'].includes(manager.status.state);return {...manager.status,connector_runtime:CONNECTOR_RUNTIME,connected:Boolean(session),mode:'automatic_required',readiness:session?'native_wakeup_acceptance_unverified':reconnectAt?'reconnecting':'not_connected',...(reconnectAt?{retry_after_ms:Math.max(0,reconnectAt-now())}:{}),...(waiting?{waiter_command:approvalWaiterCommand(directory)}:session?{waiter_command:waiterCommand(directory)}:{})};}
     if(def.name==='broker_cancel_setup'){approvalResumed=true;installation.suppressSetup(verified.conversationId,true);return manager.cancel();}
     if(def.name==='broker_connect') {
