@@ -8,7 +8,7 @@ jobs:
   native_waiter_once:
     # The single branch transition approved on 2026-11-04. Not PR events,
     # future pushes, manual runs or reruns. The worker spends at most one Enter.
-    if: github.repository == 'matuto-ai/antigravity-psst-connector' && github.event_name == 'push' && github.ref == 'refs/heads/feat/complete-native-qualification' && github.event.before == 'f0b0cf7b32c84004e12df0d75b4966ea8c10517a' && github.run_attempt == 1
+    if: github.repository == 'matuto-ai/antigravity-psst-connector' && github.event_name == 'push' && github.ref == 'refs/heads/feat/complete-native-qualification' && github.event.before == 'd853f5baf9fa542d15e8ffc54d4326ec61a1f57d' && github.run_attempt == 1
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

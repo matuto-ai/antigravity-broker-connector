@@ -35,6 +35,7 @@ writeFileSync(home+'/.gemini/config/mcp_config.json',JSON.stringify(fixture.mcp)
 let turn={sent:0,completed:0},presenceState={sent:0,completed:0},presenceProof=null,messageState={sent:0,completed:0},messageProof=null,messageBoundaries=[],providerFailure=null,providerDiagnostics=null;const requests=[],identities=[],snapshots=[];
 const oneShotAuthorized=process.argv[3]==='--confirm-waiter-once';
 assert(!oneShotAuthorized||mode==='idle','one-shot authorization is scoped to one idle fixture only');
+let confirmedWaiterCommand=null;
 let permissionConfirmations=0,permissionVersion=-1,permissionSentAt=0,permissionDismissed=false,permissionDiagnostics=null;
 let nativePermissionBlocked=false;
 let busyInjection=false,providerActive=0,providerMaxActive=0;
@@ -87,7 +88,7 @@ const provider=createServer(async(req,res)=>{if(requests.length>=20){res.writeHe
   if(mode==='setup'&&setupState.completed<2){step=setupProviderStep(input,setupState,fixture.brokerUrl);setupState=step.state;if(setupState.completed===2){assert.equal(fixture.enrollmentPostCount,1);assert(!existsSync(fixture.installationDirectory+'/selected.json'),'pending setup must not select credentials');step=waiterProviderStep(input,approvalWaiterState,setupState.waiterCommand);approvalWaiterState=step.state;}}
   else if(mode==='setup'&&approvalWaiterState.completed===0){step=waiterProviderStep(input,approvalWaiterState,setupState.waiterCommand);approvalWaiterState=step.state;}
   else if(['idle','setup','busy'].includes(mode)&&turn.completed===2){
-   if(waiterState.completed===0){step=waiterProviderStep(input,waiterState,turn.waiterCommand);waiterState=step.state;if(mode==='busy'&&waiterState.completed===1){assert.equal(activeWaiters(),1);messageProof=fixture.seedMessages(identities[0].client_id);idleSeeded=true;busyInjection=true;await waitForInbound();await new Promise(resolve=>setTimeout(resolve,1200));assert.equal(messageRow().state,'pending');assert.equal(providerMaxActive,1,'native must not overlap model turns on a busy arrival');}}
+   if(waiterState.completed===0){step=waiterProviderStep(input,waiterState,turn.waiterCommand,{confirmedCommand:confirmedWaiterCommand});waiterState=step.state;if(mode==='busy'&&waiterState.completed===1){assert.equal(activeWaiters(),1);messageProof=fixture.seedMessages(identities[0].client_id);idleSeeded=true;busyInjection=true;await waitForInbound();await new Promise(resolve=>setTimeout(resolve,1200));assert.equal(messageRow().state,'pending');assert.equal(providerMaxActive,1,'native must not overlap model turns on a busy arrival');}}
    else if(messageState.completed<MESSAGE_TOOLS.length){assert(idleSeeded&&messageProof,'unsolicited wake must follow actual stopped-turn waiter and durable arrival');step=messageProviderStep(input,messageState,messageProof);const advanced=step.state.completed>messageState.completed;messageState=step.state;if(advanced)recordMessageBoundary();if(messageState.completed===MESSAGE_TOOLS.length){step=waiterProviderStep(input,rearmState,turn.waiterCommand);rearmState=step.state;}}
    else {step=waiterProviderStep(input,rearmState,turn.waiterCommand);rearmState=step.state;}
   }
@@ -98,7 +99,7 @@ const provider=createServer(async(req,res)=>{if(requests.length>=20){res.writeHe
   if(step.identity){
    identities.push(step.identity);snapshots.push(snapshot(step.identity));
    if(mode==='presence'){presenceProof=fixture.seedPresence(step.identity.client_id);const next=presenceProviderStep(input,presenceState,presenceProof);presenceState=next.state;parts=next.parts;}
-   if(['idle','setup','busy'].includes(mode)){const next=waiterProviderStep(input,waiterState,turn.waiterCommand);waiterState=next.state;parts=next.parts;}
+   if(['idle','setup','busy'].includes(mode)){const next=waiterProviderStep(input,waiterState,turn.waiterCommand,{confirmedCommand:confirmedWaiterCommand});waiterState=next.state;parts=next.parts;}
    if(mode==='messages'){messageProof=fixture.seedMessages(step.identity.client_id);await waitForInbound();const next=messageProviderStep(input,messageState,messageProof);messageState=next.state;parts=next.parts;}
   }
  } catch(error){providerFailure=['native background command schema required','exact disposable native waiter command required','missing native waiter command response','native waiter response failed','actual setup status not connected','native setup wrapper missing','unsupported_native_response_envelope'].includes(error.message)?error.message:'native_fixture_assertion_failed';providerDiagnostics={response:error.proofDiagnostics??null,nativeState:diagnosticNativeState()};parts=[{text:'OFFLINE_ACTUAL_PROOF_FAILED'}];}
@@ -150,7 +151,7 @@ const compactPoll=interactive?setInterval(()=>{
     const command=verifiedPermissionCommand();permissionDiagnostics=exactWaiterPermission(current,{expectedCommand:command});
     if(permissionDiagnostics.recognized){
      // Spend before input. There is no retry on an unchanged or uncertain screen.
-     permissionConfirmations=1;permissionVersion=screen.version;permissionSentAt=Date.now();
+     confirmedWaiterCommand=command;permissionConfirmations=1;permissionVersion=screen.version;permissionSentAt=Date.now();
      consentEvidence.push({action:'confirm_exact_fixture_waiter_once',screen:current});child.stdin.write('\r');return;
     }
    }catch{permissionDiagnostics={provenanceVerified:false};}

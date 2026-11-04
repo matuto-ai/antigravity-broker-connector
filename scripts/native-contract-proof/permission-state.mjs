@@ -16,19 +16,23 @@ export function exactWaiterPermission(screen,{expectedCommand}={}) {
  const compact=commandValid?expectedCommand.replace(/\s/g,''):null;
  const exactCommand=commandValid&&displayed!==null&&(displayed===compact||displayed===compact.replaceAll("'",''));
  const options=question>=0?lines.slice(question+1):[];
- const onceFocused=options[0]==='> Yes, run command'&&options.filter(line=>line.startsWith('>')).length===1;
- const cancel=options.indexOf('No, cancel');
- const optionText=cancel>=0?options.slice(1,cancel).join('').replace(/\s/g,''):null;
- const prefix="/usr/local/bin/node /plugin/bin/psst-antigravity-native.mjs wait";
- const choices=`Yes, and always allow in this conversation for commands that start with '${prefix}'Yes, and always allow for commands that start with '${prefix}' (Persist to settings.json)`.replace(/\s/g,'');
- const knownChoices=optionText===choices;
+ const onceFocused=options[0]==='> 1. Yes, run command'&&options.filter(line=>line.startsWith('>')).length===1;
+ const cancel=options.indexOf('4. No, cancel');
+ const choice2=/^2\. Yes, and always allow in this conversation for commands that start with '(.+)'$/.exec(options[1]??'');
+ const choice3=/^3\. Yes, and always allow for commands that start with '(.+)' \(Persist to settings\.json\)$/.exec(options[2]??'');
+ // Native abbreviates the *unselected* persistent choices. Their shared label
+ // must be a literal prefix of the exact full command verified above.
+ const visiblePrefix=choice2?.[1];
+ const prefixMatches=typeof visiblePrefix==='string'&&visiblePrefix.endsWith('...')&&visiblePrefix.length>=72&&
+  commandValid&&expectedCommand.startsWith(visiblePrefix.slice(0,-3));
+ const knownChoices=cancel===3&&Boolean(choice2&&choice3)&&choice3[1]===visiblePrefix&&prefixMatches;
  // Only inert key hints/status may follow the exact four known options. No
  // checkbox, remembered choice, additional control or unrecognized wording.
- const footer=cancel>=0?options.slice(cancel+1).join(' '):'';
- const footerWords=new Set('Navigate Select Confirm Run run command edit Edit enter ctrl e g esc Esc cancel to fixture'.split(' '));
- const knownFooter=footer.length>0&&footer.length<160&&/^[A-Za-z ↑↓/·+.:-]+$/.test(footer)&&
+ const footer=cancel>=0?options.slice(cancel+1).join(' ').replace(/ +/g,' '):'';
+ const footerWords=new Set('Navigate Choose choose expand Select select Confirm confirm Accept accept Run run command edit Edit review rerun re-run enter ctrl e g esc Esc cancel to fixture'.split(' '));
+ const knownFooter=footer.length>0&&footer.length<160&&/^[A-Za-z0-9 ↑↓/·+.:-]+$/.test(footer)&&
   (footer.match(/[A-Za-z]+/g)??[]).every(word=>footerWords.has(word));
- const safeWords=new Set("Yes No run command and always allow in this conversation for commands that start with Persist to settings json cancel Navigate Select Confirm enter ctrl e g esc Esc edit Edit fixture usr local bin node plugin psst-antigravity-native mjs wait 1 2 3 4".split(' '));
+ const safeWords=new Set("Yes No run command and always allow in this conversation for commands that start with Persist to settings json cancel Navigate Choose choose expand Select select Confirm confirm Accept accept enter ctrl e g esc Esc edit Edit review rerun re-run fixture usr local bin node plugin psst-antigravity-native mjs wait 1 2 3 4".split(' '));
  const controlShape=options.join('\n').replace(/[A-Za-z0-9_-]+/g,word=>safeWords.has(word)?word:'?').slice(0,2048);
  return {controlShape,recognized:bounded&&unique&&exactCommand&&onceFocused&&knownChoices&&knownFooter,header:header>=0,question:question>header,exactCommand,onceFocused,knownChoices,knownFooter};
 }

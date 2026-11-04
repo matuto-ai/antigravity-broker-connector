@@ -23,3 +23,13 @@ test('fixture rejects forged response identity and command target or missing res
  const failed=response(call);failed.contents[1].parts[0].functionResponse.response={error:'denied'};
  assert.throws(()=>waiterProviderStep(failed,step.state,command),/failed/);
 });
+
+test('native history may use only the exact independently confirmed hook rewrite',()=>{
+ const step=waiterProviderStep({tools},{sent:0,completed:0},command);
+ const confirmedCommand=command+" '12345678-1234-4123-8123-123456789abc'";
+ const call={...step.parts[0].functionCall,args:{...step.parts[0].functionCall.args,CommandLine:confirmedCommand}};
+ assert.equal(waiterProviderStep(response(call),step.state,command,{confirmedCommand}).state.completed,1);
+ assert.throws(()=>waiterProviderStep(response(call),step.state,command));
+ assert.throws(()=>waiterProviderStep(response({...call,args:{...call.args,CommandLine:confirmedCommand.replace('12345678','22345678')}}),step.state,command,{confirmedCommand}));
+ assert.throws(()=>waiterProviderStep(response(call),step.state,command,{confirmedCommand:confirmedCommand+'; true'}));
+});
