@@ -8,7 +8,7 @@ export function pendingNativeCommandPermission(screen, {trustSent=false, command
 // verify native provenance and the live, unconsumed permit before pressing Enter.
 export function exactWaiterPermission(screen,{expectedCommand}={}) {
  const bounded=typeof screen==='string'&&screen.length<=16384&&!/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/u.test(screen);
- const commandValid=typeof expectedCommand==='string'&&/^'\/usr\/local\/bin\/node' '\/plugin\/bin\/psst-antigravity-native\.mjs' wait '\/tmp\/proof-home\/\.config\/psst\/antigravity\/native\/[0-9]+-[0-9]+-[0-9a-f-]{36}' '[0-9a-f-]{36}'$/.test(expectedCommand);
+ const commandValid=typeof expectedCommand==='string'&&/^'\/usr\/local\/bin\/node' '\/plugin\/bin\/psst-antigravity-native\.mjs' (?:wait|wait-approval) '\/tmp\/proof-home\/\.config\/psst\/antigravity\/native\/[0-9]+-[0-9]+-[0-9a-f-]{36}' '[0-9a-f-]{36}'$/.test(expectedCommand);
  const lines=bounded?screen.split('\n').map(line=>line.trim()).filter(Boolean):[];
  const header=lines.indexOf('Requesting permission for:'),question=lines.indexOf('Run this command?');
  const unique=lines.filter(line=>line==='Requesting permission for:').length===1&&lines.filter(line=>line==='Run this command?').length===1;

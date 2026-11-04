@@ -19,7 +19,7 @@ tar -xzf "$tmp/cli.tgz" -C "$tmp" antigravity
 chmod 755 "$tmp" "$tmp/antigravity"
 fixture="$tmp/fixture"
 mkdir -p "$fixture/xterm-pinned"
-for file in actual-worker.mjs actual-plugin-fixture.mjs approval-broker-fixture.mjs setup-provider-step.mjs setup-provider-step.test.mjs permission-state.mjs permission-state.test.mjs waiter-boundary.mjs waiter-boundary.test.mjs waiter-provider-step.mjs waiter-provider-step.test.mjs approval-broker-fixture.test.mjs message-provider-step.mjs actual-provider-step.mjs presence-provider-step.mjs presence-provider-step.test.mjs message-provider-step.test.mjs actual-provider-step.test.mjs recorded-actual-envelope.json actual-compact-state.mjs actual-compact-state.test.mjs composer-state.mjs composer-state.test.mjs recorded-composer-screen.json trust-state.mjs trust-state.test.mjs recorded-trust-screen.json consent-state-navigation.mjs consent-navigation.test.mjs recorded-consent-screens.json recorded-navigation-screens.json xterm-screen.mjs consent-state.mjs xterm-screen.test.mjs consent-state.test.mjs recorded-terminal.json xterm-integrity.json; do cp "$root/$file" "$fixture/$file"; done
+for file in actual-worker.mjs actual-plugin-fixture.mjs approval-broker-fixture.mjs setup-provider-step.mjs setup-provider-step.test.mjs permission-state.mjs permission-state.test.mjs waiter-authorization.mjs waiter-authorization.test.mjs waiter-boundary.mjs waiter-boundary.test.mjs waiter-provider-step.mjs waiter-provider-step.test.mjs approval-broker-fixture.test.mjs message-provider-step.mjs actual-provider-step.mjs presence-provider-step.mjs presence-provider-step.test.mjs message-provider-step.test.mjs actual-provider-step.test.mjs recorded-actual-envelope.json actual-compact-state.mjs actual-compact-state.test.mjs composer-state.mjs composer-state.test.mjs recorded-composer-screen.json trust-state.mjs trust-state.test.mjs recorded-trust-screen.json consent-state-navigation.mjs consent-navigation.test.mjs recorded-consent-screens.json recorded-navigation-screens.json xterm-screen.mjs consent-state.mjs xterm-screen.test.mjs consent-state.test.mjs recorded-terminal.json xterm-integrity.json; do cp "$root/$file" "$fixture/$file"; done
 curl --fail --location --max-time 120 https://registry.npmjs.org/@xterm/headless/-/headless-6.0.0.tgz -o "$tmp/xterm.tgz"
 node --input-type=module - "$tmp/xterm.tgz" <<'NODE'
 import {readFileSync} from 'node:fs';import {createHash} from 'node:crypto';
@@ -39,13 +39,13 @@ openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 -subj /CN=offline-psst
 # Publicly readable only within this disposable fixture staging directory; never user keys.
 chmod 755 "$tmp/tls" "$tmp/psst" "$tmp/psst/src" "$tmp/psst/scripts"
 chmod 644 "$tmp/tls/key.pem" "$tmp/tls/cert.pem"
-PSST_APPROVAL_FIXTURE_BROKER_ROOT="$tmp/psst" node --test "$fixture/approval-broker-fixture.test.mjs" "$fixture/permission-state.test.mjs" "$fixture/waiter-boundary.test.mjs" "$fixture/setup-provider-step.test.mjs" "$fixture/waiter-provider-step.test.mjs" "$fixture/presence-provider-step.test.mjs" "$fixture/message-provider-step.test.mjs" "$fixture/actual-provider-step.test.mjs" "$fixture/actual-compact-state.test.mjs"
+PSST_APPROVAL_FIXTURE_BROKER_ROOT="$tmp/psst" node --test "$fixture/approval-broker-fixture.test.mjs" "$fixture/permission-state.test.mjs" "$fixture/waiter-authorization.test.mjs" "$fixture/waiter-boundary.test.mjs" "$fixture/setup-provider-step.test.mjs" "$fixture/waiter-provider-step.test.mjs" "$fixture/presence-provider-step.test.mjs" "$fixture/message-provider-step.test.mjs" "$fixture/actual-provider-step.test.mjs" "$fixture/actual-compact-state.test.mjs"
 mounts=(--mount "type=bind,src=$tmp/antigravity,dst=/native/antigravity,readonly")
 for dir in src bin vendor; do
   [[ -d "$repo/$dir" && ! -L "$repo/$dir" ]] || exit 1
   mounts+=(--mount "type=bind,src=$repo/$dir,dst=/plugin/$dir,readonly")
 done
-for file in actual-worker.mjs actual-plugin-fixture.mjs approval-broker-fixture.mjs setup-provider-step.mjs permission-state.mjs waiter-boundary.mjs waiter-provider-step.mjs message-provider-step.mjs actual-provider-step.mjs presence-provider-step.mjs actual-compact-state.mjs composer-state.mjs trust-state.mjs xterm-screen.mjs consent-state-navigation.mjs; do
+for file in actual-worker.mjs actual-plugin-fixture.mjs approval-broker-fixture.mjs setup-provider-step.mjs permission-state.mjs waiter-authorization.mjs waiter-boundary.mjs waiter-provider-step.mjs message-provider-step.mjs actual-provider-step.mjs presence-provider-step.mjs actual-compact-state.mjs composer-state.mjs trust-state.mjs xterm-screen.mjs consent-state-navigation.mjs; do
  mounts+=(--mount "type=bind,src=$fixture/$file,dst=/fixture/$file,readonly")
 done
 mounts+=(--mount "type=bind,src=$fixture/xterm-pinned/package,dst=/fixture/xterm-pinned/package,readonly" --mount "type=bind,src=$tmp/psst,dst=/psst,readonly" --mount "type=bind,src=$tmp/tls,dst=/fixture-tls,readonly")
@@ -56,7 +56,8 @@ case "${2:-all}" in
  baseline) modes=(root compact new presence messages);;
  automatic) modes=(idle setup busy);;
  authorized-once) modes=(idle); extra_args=(--confirm-waiter-once);;
- *) echo 'expected all, baseline, automatic or explicitly authorized-once native qualification group' >&2; exit 2;;
+ authorized-matrix) modes=(idle setup busy); extra_args=(--confirm-authorized-matrix);;
+ *) echo 'expected all, baseline, automatic or explicitly authorized-once/authorized-matrix native qualification group' >&2; exit 2;;
 esac
 for mode in "${modes[@]}"; do
  timeout --kill-after=5s 50s docker run --rm --name "$name" --network none --user 1000:1000 --read-only --memory 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m "${mounts[@]}" -e HOME=/tmp/proof-home "$image" node /fixture/actual-worker.mjs "$mode" "${extra_args[@]}" || status=1

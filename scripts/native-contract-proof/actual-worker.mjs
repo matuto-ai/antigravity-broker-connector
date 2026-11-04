@@ -4,6 +4,7 @@ import {actualCompactContinuity,actualRootRotation,matchingIdleStop} from './act
 import {presenceProviderStep} from './presence-provider-step.mjs';
 import {pendingNativeCommandPermission,exactWaiterPermission} from './permission-state.mjs';
 import {setupProviderStep} from './setup-provider-step.mjs';
+import {waiterAuthorizationPlan,expectedWaiterPhase} from './waiter-authorization.mjs';
 import {stoppedNativeWaiter} from './waiter-boundary.mjs';
 import {waiterProviderStep} from './waiter-provider-step.mjs';
 import {messageProviderStep,MESSAGE_TOOLS} from './message-provider-step.mjs';
@@ -15,6 +16,7 @@ import {consentState,postConsentState,consentNavigation,navigationRenderState} f
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {processIdentity} from '/plugin/src/native-binding.mjs';
+import {readPrivateJson} from '/plugin/src/native-plugin.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {networkInterfaces} from 'node:os';
 import {readFileSync,writeFileSync,mkdirSync,existsSync,lstatSync,realpathSync,readdirSync} from 'node:fs';
@@ -34,9 +36,10 @@ const events=fixture.eventsFile;
 writeFileSync(home+'/.gemini/config/hooks.json',JSON.stringify(fixture.hooks));
 writeFileSync(home+'/.gemini/config/mcp_config.json',JSON.stringify(fixture.mcp));
 let turn={sent:0,completed:0},presenceState={sent:0,completed:0},presenceProof=null,messageState={sent:0,completed:0},messageProof=null,messageBoundaries=[],providerFailure=null,providerDiagnostics=null;const requests=[],identities=[],snapshots=[];
-const oneShotAuthorized=process.argv[3]==='--confirm-waiter-once';
-assert(!oneShotAuthorized||mode==='idle','one-shot authorization is scoped to one idle fixture only');
-let confirmedWaiterCommand=null;
+const confirmationPlan=waiterAuthorizationPlan(mode,process.argv[3]);
+const oneShotAuthorized=confirmationPlan.length>0;
+const confirmedCommands={approval:null,inbox:null,rearm:null},confirmedDigests=[];
+let permissionHookCount=0;
 let permissionConfirmations=0,permissionVersion=-1,permissionSentAt=0,permissionDismissed=false,permissionDiagnostics=null;
 let nativePermissionBlocked=false,fixtureShutdownRequested=false;
 let busyInjection=false,providerActive=0,providerMaxActive=0;
@@ -86,12 +89,12 @@ const provider=createServer(async(req,res)=>{if(requests.length>=20){res.writeHe
  else {let parts;
  try {
   let step;
-  if(mode==='setup'&&setupState.completed<2){step=setupProviderStep(input,setupState,fixture.brokerUrl);setupState=step.state;if(setupState.completed===2){assert.equal(fixture.enrollmentPostCount,1);assert(!existsSync(fixture.installationDirectory+'/selected.json'),'pending setup must not select credentials');step=waiterProviderStep(input,approvalWaiterState,setupState.waiterCommand);approvalWaiterState=step.state;}}
-  else if(mode==='setup'&&approvalWaiterState.completed===0){step=waiterProviderStep(input,approvalWaiterState,setupState.waiterCommand);approvalWaiterState=step.state;}
+  if(mode==='setup'&&setupState.completed<2){step=setupProviderStep(input,setupState,fixture.brokerUrl);setupState=step.state;if(setupState.completed===2){assert.equal(fixture.enrollmentPostCount,1);assert(!existsSync(fixture.installationDirectory+'/selected.json'),'pending setup must not select credentials');step=waiterProviderStep(input,approvalWaiterState,setupState.waiterCommand,{confirmedCommand:confirmedCommands.approval});approvalWaiterState=step.state;}}
+  else if(mode==='setup'&&approvalWaiterState.completed===0){step=waiterProviderStep(input,approvalWaiterState,setupState.waiterCommand,{confirmedCommand:confirmedCommands.approval});approvalWaiterState=step.state;}
   else if(['idle','setup','busy'].includes(mode)&&turn.completed===2){
-   if(waiterState.completed===0){step=waiterProviderStep(input,waiterState,turn.waiterCommand,{confirmedCommand:confirmedWaiterCommand});waiterState=step.state;if(mode==='busy'&&waiterState.completed===1){assert.equal(activeWaiters(),1);messageProof=fixture.seedMessages(identities[0].client_id);idleSeeded=true;busyInjection=true;await waitForInbound();await new Promise(resolve=>setTimeout(resolve,1200));assert.equal(messageRow().state,'pending');assert.equal(providerMaxActive,1,'native must not overlap model turns on a busy arrival');}}
-   else if(messageState.completed<MESSAGE_TOOLS.length){assert(idleSeeded&&messageProof,'unsolicited wake must follow actual stopped-turn waiter and durable arrival');step=messageProviderStep(input,messageState,messageProof);const advanced=step.state.completed>messageState.completed;messageState=step.state;if(advanced)recordMessageBoundary();if(messageState.completed===MESSAGE_TOOLS.length){step=waiterProviderStep(input,rearmState,turn.waiterCommand);rearmState=step.state;}}
-   else {step=waiterProviderStep(input,rearmState,turn.waiterCommand);rearmState=step.state;}
+   if(waiterState.completed===0){step=waiterProviderStep(input,waiterState,turn.waiterCommand,{confirmedCommand:confirmedCommands.inbox});waiterState=step.state;if(mode==='busy'&&waiterState.completed===1){assert.equal(activeWaiters(),1);messageProof=fixture.seedMessages(identities[0].client_id);idleSeeded=true;busyInjection=true;await waitForInbound();await new Promise(resolve=>setTimeout(resolve,1200));assert.equal(messageRow().state,'pending');assert.equal(providerMaxActive,1,'native must not overlap model turns on a busy arrival');}}
+   else if(messageState.completed<MESSAGE_TOOLS.length){assert(idleSeeded&&messageProof,'unsolicited wake must follow actual stopped-turn waiter and durable arrival');step=messageProviderStep(input,messageState,messageProof);const advanced=step.state.completed>messageState.completed;messageState=step.state;if(advanced)recordMessageBoundary();if(messageState.completed===MESSAGE_TOOLS.length){step=waiterProviderStep(input,rearmState,turn.waiterCommand,{confirmedCommand:confirmedCommands.rearm});rearmState=step.state;}}
+   else {step=waiterProviderStep(input,rearmState,turn.waiterCommand,{confirmedCommand:confirmedCommands.rearm});rearmState=step.state;}
   }
   else if(mode==='messages'&&turn.completed===2){step=messageProviderStep(input,messageState,messageProof);const advanced=step.state.completed>messageState.completed;messageState=step.state;if(advanced)recordMessageBoundary();}
   else if(mode==='presence'&&turn.completed===2){step=presenceProviderStep(input,presenceState,presenceProof);presenceState=step.state;}
@@ -100,7 +103,7 @@ const provider=createServer(async(req,res)=>{if(requests.length>=20){res.writeHe
   if(step.identity){
    identities.push(step.identity);snapshots.push(snapshot(step.identity));
    if(mode==='presence'){presenceProof=fixture.seedPresence(step.identity.client_id);const next=presenceProviderStep(input,presenceState,presenceProof);presenceState=next.state;parts=next.parts;}
-   if(['idle','setup','busy'].includes(mode)){const next=waiterProviderStep(input,waiterState,turn.waiterCommand,{confirmedCommand:confirmedWaiterCommand});waiterState=next.state;parts=next.parts;}
+   if(['idle','setup','busy'].includes(mode)){const next=waiterProviderStep(input,waiterState,turn.waiterCommand,{confirmedCommand:confirmedCommands.inbox});waiterState=next.state;parts=next.parts;}
    if(mode==='messages'){messageProof=fixture.seedMessages(step.identity.client_id);await waitForInbound();const next=messageProviderStep(input,messageState,messageProof);messageState=next.state;parts=next.parts;}
   }
  } catch(error){providerFailure=['native background command schema required','exact disposable native waiter command required','missing native waiter command response','native waiter response failed','actual setup status not connected','native setup wrapper missing','unsupported_native_response_envelope'].includes(error.message)?error.message:'native_fixture_assertion_failed';providerDiagnostics={response:error.proofDiagnostics??null,nativeState:diagnosticNativeState()};parts=[{text:'OFFLINE_ACTUAL_PROOF_FAILED'}];}
@@ -118,32 +121,48 @@ function activeWaiters(subcommand='wait'){let count=0;for(const pid of readdirSy
 // Reconstruct only the exact command issued by the real native PreToolUse hook.
 // Tokens remain in memory and the existing private binding DB, never proof logs.
 function verifiedPermissionCommand(){
- assert(oneShotAuthorized&&mode==='idle'&&permissionConfirmations===0);
+ const phase=expectedWaiterPhase(confirmationPlan,permissionConfirmations,{mode,setup:setupState,approval:approvalWaiterState,approvalGranted,turn,inbox:waiterState,messages:messageState,messageTools:MESSAGE_TOOLS.length,rearm:rearmState,idleSeeded,busyInjection});
+ assert(phase,'native_waiter_phase_not_authorized');
  const history=fixture.readEvents().filter(h=>h.event==='PreToolUse'&&h.toolName==='run_command');
- assert.equal(history.length,1);assert.equal(history[0].denied,false);
- assert.equal(identities.length,1);assert.equal(snapshots.length,1);
- const snap=snapshot(identities[0]);assert.deepEqual(snap,snapshots[0]);
- assert.deepEqual(processIdentity(snap.host.pid),snap.host);
- assert.deepEqual(processIdentity(snap.connectorProcess.pid),snap.connectorProcess);
- assert.equal(snap.host.executable,'/native/antigravity');
- assert.equal(history[0].hostPid,snap.host.pid);assert.equal(history[0].hostStart,snap.host.start);
- assert.equal(history[0].conversationId,snap.conversationId);
- assert.equal(history[0].environmentConversationId,snap.conversationId);
- const directory=`${home}/.config/psst/antigravity/native/${snap.host.pid}-${snap.host.start}-${snap.host.boot}`;
- assert.equal(realpathSync(directory),directory);
- const original=`'/usr/local/bin/node' '/plugin/bin/psst-antigravity-native.mjs' wait '${directory}'`;
- assert.equal(turn.waiterCommand,original);assert.equal(waiterState.sent,1);assert.equal(waiterState.completed,0);
- const db=new DatabaseSync(directory+'/binding.sqlite',{readOnly:true});let permits;
- try{permits=db.prepare('SELECT * FROM permits').all();}finally{db.close();}
+ assert.equal(history.length,permissionConfirmations+1);
+ for(let i=0;i<confirmedDigests.length;i++)assert.equal(history[i].commandDigest,confirmedDigests[i]);
+ const observed=history.at(-1);assert.equal(observed.denied,false);
+ const base=home+'/.config/psst/antigravity/native';
+ const owners=readdirSync(base).map(name=>base+'/'+name).filter(path=>existsSync(path+'/owner.json'));
+ assert.equal(owners.length,1);const owner=readPrivateJson(owners[0]+'/owner.json');
+ assert.deepEqual(processIdentity(owner.host.pid),owner.host);
+ assert.deepEqual(processIdentity(owner.connectorProcess.pid),owner.connectorProcess);
+ assert.equal(owner.host.executable,'/native/antigravity');
+ assert.equal(owner.server,'psst-native_psst');
+ const directory=`${base}/${owner.host.pid}-${owner.host.start}-${owner.host.boot}`;
+ assert.equal(owners[0],directory);assert.equal(realpathSync(directory),directory);
+ assert.equal(observed.hostPid,owner.host.pid);assert.equal(observed.hostStart,owner.host.start);
+ assert.equal(observed.environmentConversationId,observed.conversationId);
+ const tool=phase==='approval'?'broker_wait_approval':'broker_wait';
+ const original=`'/usr/local/bin/node' '/plugin/bin/psst-antigravity-native.mjs' ${phase==='approval'?'wait-approval':'wait'} '${directory}'`;
+ assert.equal(phase==='approval'?setupState.waiterCommand:turn.waiterCommand,original);
+ if(phase==='approval'){
+  assert(!existsSync(fixture.installationDirectory+'/selected.json'));assert.equal(fixture.enrollmentPostCount,1);
+ }else{
+  assert.equal(identities.length,1);assert.equal(snapshots.length,1);
+  const snap=snapshot(identities[0]);assert.deepEqual(snap,snapshots[0]);
+  assert.equal(observed.conversationId,snap.conversationId);
+  assert.deepEqual(owner.host,snap.host);assert.deepEqual(owner.connectorProcess,snap.connectorProcess);
+ }
+ const db=new DatabaseSync(directory+'/binding.sqlite',{readOnly:true});let permits,bound;
+ try{permits=db.prepare('SELECT * FROM permits').all();bound=db.prepare('SELECT * FROM binding WHERE id=1').get();}finally{db.close();}
+ assert.equal(bound.closed,0);assert.equal(bound.owner_epoch,owner.ownerEpoch);assert.equal(bound.conversation,observed.conversationId);
+ assert.deepEqual(JSON.parse(bound.host),owner.host);
  assert.equal(permits.length,1);const permit=permits[0];
- assert.equal(permit.tool,'broker_wait');assert.equal(permit.conversation,snap.conversationId);
+ assert.equal(permit.tool,tool);assert.equal(permit.conversation,bound.conversation);
  assert.equal(permit.digest,createHash('sha256').update('{}').digest('hex'));
  assert(permit.expires>Date.now()+1000);assert(/^[0-9a-f-]{36}$/.test(permit.token));
  const command=original+` '${permit.token}'`;
- assert.equal(createHash('sha256').update(command).digest('hex'),history[0].commandDigest);
+ const digest=createHash('sha256').update(command).digest('hex');assert.equal(digest,observed.commandDigest);
  assert.equal(activeWaiters()+activeWaiters('wait-approval'),0);
- return command;
+ return {command,phase,digest,hookCount:history.length};
 }
+
 function progressAutomaticFixture(){
  if(!['idle','setup','busy'].includes(mode)||providerFailure||!termsAccepted||!trustConfirmationSent||fixtureShutdownRequested)return;
  const observed=fixture.readEvents(),command=observed.findLast(h=>h.event==='PreToolUse'&&h.toolName==='run_command');
@@ -175,19 +194,22 @@ const compactPoll=interactive?setInterval(()=>{
  if(!parserFailed&&!overflow&&!timedOut){try{progressAutomaticFixture();}catch{providerFailure='native_waiter_boundary_failed';child.kill('SIGTERM');}}
  const current=screen.text();if(parserFailed||overflow||timedOut||!screen.complete||Date.now()-Math.max(lastScreenChange,screen.lastParsedAt)<250)return;
  if(['idle','setup','busy'].includes(mode)&&pendingNativeCommandPermission(current,{trustSent:trustConfirmationSent,commandObserved:fixture.readEvents().some(h=>h.event==='PreToolUse'&&h.toolName==='run_command')})){
-  if(oneShotAuthorized&&permissionConfirmations===0){
+  const commandCount=fixture.readEvents().filter(h=>h.event==='PreToolUse'&&h.toolName==='run_command').length;
+  if(permissionConfirmations>0&&!permissionDismissed&&commandCount===permissionHookCount&&Date.now()-permissionSentAt<1000)return;
+  if(oneShotAuthorized&&permissionConfirmations<confirmationPlan.length){
    try{
-    const command=verifiedPermissionCommand();permissionDiagnostics=exactWaiterPermission(current,{expectedCommand:command});
+    const verified=verifiedPermissionCommand();permissionDiagnostics=exactWaiterPermission(current,{expectedCommand:verified.command});
     if(permissionDiagnostics.recognized){
-     // Spend before input. There is no retry on an unchanged or uncertain screen.
-     confirmedWaiterCommand=command;permissionConfirmations=1;permissionVersion=screen.version;permissionSentAt=Date.now();
-     consentEvidence.push({action:'confirm_exact_fixture_waiter_once',screen:current});child.stdin.write('\r');return;
+     // Spend this phase before input. Never retry an unchanged/uncertain prompt.
+     confirmedCommands[verified.phase]=verified.command;confirmedDigests.push(verified.digest);
+     permissionConfirmations++;permissionHookCount=verified.hookCount;permissionVersion=screen.version;permissionSentAt=Date.now();permissionDismissed=false;
+     consentEvidence.push({action:'confirm_exact_fixture_waiter_once',phase:verified.phase,screen:current});child.stdin.write('\r');return;
     }
    }catch{permissionDiagnostics={provenanceVerified:false};}
-  }else if(permissionConfirmations===1&&!permissionDismissed&&fixture.readEvents().filter(h=>h.event==='PreToolUse'&&h.toolName==='run_command').length===1&&Date.now()-permissionSentAt<1000){return;}
+  }
   nativePermissionBlocked=true;timeoutWaiters={inbox:activeWaiters(),approval:activeWaiters('wait-approval')};consentEvidence.push({action:'stop_pending_native_command_permission',screen:current});clearInterval(compactPoll);child.kill('SIGTERM');return;
  }
- if(permissionConfirmations===1&&screen.version>permissionVersion)permissionDismissed=true;
+ if(permissionConfirmations>0&&screen.version>permissionVersion)permissionDismissed=true;
  if(!themeSelected&&current.includes('Choose your color scheme:')&&/^\s*> terminal(?:\s|$)/m.test(current)){themeSelected=true;child.stdin.write('\r');return;}
  const consent=consentState(current);
  if(termsAcceptanceSent&&!termsAccepted){if(screen.version>acceptScreenVersion&&!consent.terms)termsAccepted=true;else return;}
@@ -251,7 +273,7 @@ const projectedUi=value=>value.split('\n').map(line=>(line.match(/[A-Za-z][A-Za-
 const safeScreen=value=>({rows:value.split('\n').length,composerReady:composerState(value).ready,permissionPrompt:/Allow this|permission required|Approve|command denied|not allowed|Run this command\?/i.test(value),fixtureFailure:value.includes('OFFLINE_ACTUAL_PROOF_FAILED'),waiterMention:value.includes('psst-antigravity-native'),proofComplete:value.includes('OFFLINE_NATIVE_MESSAGE_CONTEXT_VERIFIED'),ui:projectedUi(value)});
 const permissionsUnchanged=JSON.stringify(JSON.parse(readFileSync(home+'/.gemini/antigravity-cli/settings.json','utf8')).permissions)===JSON.stringify(fixture.permissions);
 const qualified=permissionsUnchanged&&actualVerified&&compactVerified&&setupVerified&&wakeupVerified&&shutdownVerified&&!nativePermissionBlocked&&!parserFailed&&!timedOut&&!overflow&&expectedExit&&(!interactive||collectionUnchecked&&termsAccepted&&!consentBlocked);
-console.log(JSON.stringify({mode,fixtureShutdownRequested,nativeSignal,waiterCompleted:waiterState.completed,approvalWaiterCompleted:approvalWaiterState.completed,rearmCompleted:rearmState.completed,permissionConfirmations,permissionsUnchanged,permissionDiagnostics,nativePermissionBlocked,blockedAction:nativePermissionBlocked?(mode==='setup'?'execute_disposable_approval_waiter_once':'execute_disposable_inbox_waiter_once'):null,timeoutWaiters,shutdownVerified,busyInjection,providerMaxActive,setupVerified,enrollmentPostCount:fixture.enrollmentPostCount,wakeupVerified,idleSeeded,idleStopped,rearmStopped,waiterProcesses,messagesVerified,messageBoundaries,presenceVerified,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence:consentEvidence.map(event=>({...event,...(event.screen?{screen:safeScreen(event.screen)}:{})})),terminalScreen:safeScreen(screen.text()),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:{bytes:Buffer.byteLength(err),parserFailure:err.includes('terminal_parser_failed'),permissionDenied:/permission|denied/i.test(err)},acceptance:qualified?(mode==='setup'?'actual_plugin_native_setup_wakeup_verified':mode==='busy'?'actual_plugin_native_busy_wakeup_verified':mode==='idle'?'actual_plugin_native_idle_wakeup_verified':mode==='messages'?'actual_plugin_native_message_context_verified':'actual_plugin_native_identity_verified'):'actual_plugin_native_qualification_unverified'}));
+console.log(JSON.stringify({mode,confirmationBudget:confirmationPlan.length,fixtureShutdownRequested,nativeSignal,waiterCompleted:waiterState.completed,approvalWaiterCompleted:approvalWaiterState.completed,rearmCompleted:rearmState.completed,permissionConfirmations,permissionsUnchanged,permissionDiagnostics,nativePermissionBlocked,blockedAction:nativePermissionBlocked?(mode==='setup'?'execute_disposable_approval_waiter_once':'execute_disposable_inbox_waiter_once'):null,timeoutWaiters,shutdownVerified,busyInjection,providerMaxActive,setupVerified,enrollmentPostCount:fixture.enrollmentPostCount,wakeupVerified,idleSeeded,idleStopped,rearmStopped,waiterProcesses,messagesVerified,messageBoundaries,presenceVerified,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence:consentEvidence.map(event=>({...event,...(event.screen?{screen:safeScreen(event.screen)}:{})})),terminalScreen:safeScreen(screen.text()),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:{bytes:Buffer.byteLength(err),parserFailure:err.includes('terminal_parser_failed'),permissionDenied:/permission|denied/i.test(err)},acceptance:qualified?(mode==='setup'?'actual_plugin_native_setup_wakeup_verified':mode==='busy'?'actual_plugin_native_busy_wakeup_verified':mode==='idle'?'actual_plugin_native_idle_wakeup_verified':mode==='messages'?'actual_plugin_native_message_context_verified':'actual_plugin_native_identity_verified'):'actual_plugin_native_qualification_unverified'}));
 assert(permissionsUnchanged,'native fixture permission settings changed');
 assert(!nativePermissionBlocked,'native_permission_confirmation_required: no additional approval or policy override was applied');
 assert(!parserFailed&&!timedOut&&!overflow,'native fixture diagnostics failed');

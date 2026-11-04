@@ -33,3 +33,13 @@ test('footer diagnostics expose only bounded key hints, never an arbitrary foote
   assert.equal(exactWaiterPermission(modal(expected).replace('tab Amend',replacement),{expectedCommand:expected}).footerDiagnostic,null);
  }
 });
+
+test('approval waiter uses the same exact one-time UI contract and cannot substitute its target',()=>{
+ const approval=expected.replace(' wait ',' wait-approval ');
+ const approvalModal=modal(approval).replaceAll(label,approval.slice(0,78)+'...');
+ assert.equal(exactWaiterPermission(approvalModal,{expectedCommand:approval}).recognized,true);
+ assert.equal(exactWaiterPermission(approvalModal,{expectedCommand:expected}).recognized,false);
+ assert.equal(exactWaiterPermission(approvalModal.replace('18-13757','19-13757'),{expectedCommand:approval}).recognized,false);
+ assert.equal(exactWaiterPermission(approvalModal.replace('1ae19951','2ae19951'),{expectedCommand:approval}).recognized,false);
+ assert.equal(exactWaiterPermission(approvalModal.replace('> 1. Yes','1. Yes').replace('2. Yes','> 2. Yes'),{expectedCommand:approval}).recognized,false);
+});
