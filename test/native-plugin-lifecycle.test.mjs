@@ -129,3 +129,50 @@ test('successful explicit replacement clears the previous connection retry sched
   assert.equal(status.waiter_command, waiterCommand(f.server.directory));
   assert.equal(f.installation.selected().requestId, requestId); assert.equal(f.calls.length, 2);
 });
+
+
+test('disconnect during startup fences late retryable failure and does not strand a status waiter', async t => {
+  const entered = barrier(), finish = barrier();
+  const f = await fixture(t, { failure: async () => { entered.resolve(); await finish.promise; throw Object.assign(Error('network'), { retryable: true }); } });
+  const id = randomUUID(), starting = f.call(id); await entered.promise;
+  await f.call(id, 'broker_disconnect'); finish.resolve();
+  const initial = await starting;
+  for (const status of [initial, await f.call(id)]) {
+    assert.equal(status.state, 'cancelled'); assert.equal(status.connected, false);
+    assert.equal(status.readiness, 'not_connected'); assert.equal(status.retry_after_ms, undefined);
+    assert.equal(status.waiter_command, undefined);
+  }
+  f.advance(600000); await f.call(id); assert.equal(f.calls.length, 1);
+});
+
+test('late startup failure cannot overwrite an explicit replacement pending request', async t => {
+  const entered = barrier(), finish = barrier(), poll = barrier(), requestId = randomUUID(); let first;
+  const f = await fixture(t, { failure: async () => { entered.resolve(); await finish.promise; throw Object.assign(Error('network'), { retryable: true }); },
+    approvalApi: { readApprovalState: () => first, beginApproval: () => ({ state: 'pending', requestId }), pollApproval: () => poll.promise } });
+  first = { state: 'approved', requestId: f.requestId };
+  const id = randomUUID(), starting = f.call(id); await entered.promise;
+  await f.call(id, 'broker_setup', { broker_url: 'https://broker.example' }); finish.resolve();
+  const status = await starting;
+  assert.equal(status.state, 'pending'); assert.equal(status.requestId, requestId);
+  assert.equal(status.waiter_command, approvalWaiterCommand(f.server.directory));
+  await f.call(id, 'broker_cancel_setup'); poll.resolve({ state: 'denied', requestId });
+});
+
+
+test('late successful startup cannot replace or publish over a newer approved setup', async t => {
+  const entered = barrier(), finish = barrier(), requestId = randomUUID(); let first, replacement;
+  const f = await fixture(t, { failure: async count => { if (count === 1) { entered.resolve(); await finish.promise; } },
+    approvalApi: { readApprovalState: () => first, beginApproval: () => replacement } });
+  first = { state: 'approved', requestId: f.requestId };
+  const connectionFile = join(f.root, 'replacement.json'), credentialId = 'enrolled-' + randomUUID();
+  f.configs.set(connectionFile, { ...f.configs.get(f.connectionFile), enrollment: { credentialId, expiresAt: '2100-01-01T00:00:00Z' } });
+  replacement = { state: 'approved', requestId, connectionFile, credentialId };
+  const id = randomUUID(), starting = f.call(id); await entered.promise;
+  await f.call(id, 'broker_setup', { broker_url: 'https://broker.example' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.installation.selected().requestId, requestId);
+  finish.resolve(); const status = await starting;
+  assert.equal(status.state, 'approved'); assert.equal(status.requestId, requestId); assert.equal(status.connected, true);
+  assert.equal(f.sessions.length, 2); assert.equal(f.sessions[0].closes.length, 0);
+  assert.deepEqual(f.sessions[1].closes, [{ closeSession: false }]);
+});

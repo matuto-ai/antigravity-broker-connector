@@ -1,26 +1,56 @@
 // Persistent authorization selection is separate from native conversation journals.
 import { homedir } from 'node:os';
 import { join, isAbsolute, dirname, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { openSync, closeSync, readFileSync, writeFileSync, fstatSync, fsyncSync, renameSync, constants } from 'node:fs';
+import { randomUUID, createHash } from 'node:crypto';
+import { openSync, closeSync, readFileSync, writeFileSync, fstatSync, fsyncSync, renameSync, realpathSync, constants } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { prepareStateRoot, readConnectorConfig } from './connector-config.mjs';
 export const installationDirectory=(env=process.env)=>env.PSST_ANTIGRAVITY_INSTALLATION_DIR??join(homedir(),'.gemini','antigravity-cli','psst','installation');
 export function readPrivate(path){const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const s=fstatSync(fd);if(!s.isFile()||(s.mode&0o077)||s.size>65536||(process.getuid&&s.uid!==process.getuid()))throw Error('private_installation_required');return JSON.parse(readFileSync(fd,'utf8'));}finally{closeSync(fd);}}
 export function savePrivate(path,value){const tmp=`${path}.${randomUUID()}.tmp`,fd=openSync(tmp,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);try{writeFileSync(fd,JSON.stringify(value)+'\n');fsyncSync(fd);}finally{closeSync(fd);}renameSync(tmp,path);const d=openSync(dirname(path),constants.O_RDONLY);try{fsyncSync(d);}finally{closeSync(d);}}
+
+/** Read only the exact candidate lineage from the frozen helper's private state.
+ * No token, credential or raw attempt is returned to callers or public status. */
+export function readApprovalParent({directory,brokerUrl,requestId}){
+ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+ if(!uuid.test(requestId))throw Error('approval_request_mismatch');
+ const broker=new URL(brokerUrl).origin,clientType='antigravity-cli';
+ const key=createHash('sha256').update(broker+'\0'+clientType).digest('hex');
+ const path=join(directory,'approvals',key,requestId,'attempt.json');
+ if(realpathSync(dirname(path))!==dirname(path))throw Error('private_installation_required');
+ const attempt=readPrivate(path);
+ if(attempt.requestId!==requestId||attempt.brokerUrl!==broker||attempt.clientType!==clientType
+  ||!(attempt.parentRequestId===null||uuid.test(attempt.parentRequestId)))throw Error('approval_request_mismatch');
+ return attempt.parentRequestId;
+}
+
 function optional(path){try{return readPrivate(path);}catch(e){if(e.code==='ENOENT')return null;throw e;}}
 export function openInstallation(directory=installationDirectory(),configReader=readConnectorConfig){
  if(!isAbsolute(directory)||resolve(directory)!==directory)throw Error('private_installation_required');prepareStateRoot(directory);
  const selectedFile=join(directory,'selected.json'),pendingFile=join(directory,'pending.json');
  function locked(fn){const path=join(directory,'selection-owner.sqlite'),fd=openSync(path,constants.O_CREAT|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);try{const s=fstatSync(fd);if(!s.isFile()||(s.mode&0o077)||(process.getuid&&s.uid!==process.getuid()))throw Error('private_installation_required');}finally{closeSync(fd);}const db=new DatabaseSync(path);try{db.exec('PRAGMA busy_timeout=1000; BEGIN EXCLUSIVE; CREATE TABLE IF NOT EXISTS owner(id INTEGER);');return fn(db);}finally{db.close();}}
  function selected(){const s=optional(selectedFile);if(!s)return null;if(s.format!=='psst-selected-v1'||typeof s.revision!=='string'||!isAbsolute(s.connectionFile)||!s.credentialId)throw Error('invalid_installation_selection');const config=configReader(s.connectionFile,{});if(config.enrollment?.credentialId!==s.credentialId||config.brokerUrl!==s.brokerUrl)throw Error('installation_identity_changed');return {...s,config};}
- function pending(){const p=optional(pendingFile);if(!p)return null;if(p.format!=='psst-pending-v1'||typeof p.brokerUrl!=='string'||!(p.requestId===null||typeof p.requestId==='string')||typeof p.cancelled!=='boolean'||!(p.previousRevision===null||typeof p.previousRevision==='string'))throw Error('invalid_pending_selection');if(p.terminalState!==undefined&&(!p.cancelled||!['denied','expired','revoked'].includes(p.terminalState)||p.requestId===null))throw Error('invalid_pending_selection');if(p.requestExpiresAt!==undefined&&(typeof p.requestExpiresAt!=='string'||!Number.isFinite(Date.parse(p.requestExpiresAt))))throw Error('invalid_pending_selection');const current=optional(selectedFile);return current?.requestId===p.requestId&&p.requestId!==null?{...p,cancelled:true}:p;}
+ function pending(){const p=optional(pendingFile);if(!p)return null;if(p.format!=='psst-pending-v1'||typeof p.brokerUrl!=='string'||!(p.requestId===null||typeof p.requestId==='string')||typeof p.cancelled!=='boolean'||!(p.previousRevision===null||typeof p.previousRevision==='string'))throw Error('invalid_pending_selection');if(p.terminalState!==undefined&&(!p.cancelled||!['denied','expired','revoked'].includes(p.terminalState)||p.requestId===null))throw Error('invalid_pending_selection');if(p.requestExpiresAt!==undefined&&(typeof p.requestExpiresAt!=='string'||!Number.isFinite(Date.parse(p.requestExpiresAt))))throw Error('invalid_pending_selection');if(p.replacesRequestId!==undefined&&(typeof p.replacesRequestId!=='string'||!p.replacesRequestId||p.replacesRequestId===p.requestId))throw Error('invalid_pending_selection');const current=optional(selectedFile);return current?.requestId===p.requestId&&p.requestId!==null?{...p,cancelled:true}:p;}
  return {directory,selected,pending,
   setupSuppressed(id){return locked(db=>{db.exec('CREATE TABLE IF NOT EXISTS setup_suppression(id TEXT PRIMARY KEY,disabled INTEGER NOT NULL)');return db.prepare('SELECT disabled FROM setup_suppression WHERE id=?').get(id)?.disabled===1;});},
   suppressSetup(id,disabled){if(typeof id!=='string'||!id)throw Error('native_session_required');return locked(db=>{db.exec('CREATE TABLE IF NOT EXISTS setup_suppression(id TEXT PRIMARY KEY,disabled INTEGER NOT NULL)');db.prepare('INSERT INTO setup_suppression VALUES(?,?) ON CONFLICT(id) DO UPDATE SET disabled=excluded.disabled').run(id,disabled?1:0);});},
   sessionDisabled(id){return locked(db=>{db.exec('CREATE TABLE IF NOT EXISTS local_session(id TEXT PRIMARY KEY,disabled INTEGER NOT NULL)');return db.prepare('SELECT disabled FROM local_session WHERE id=?').get(id)?.disabled===1;});},
   setSessionDisabled(id,disabled){if(typeof id!=='string'||!id)throw Error('native_session_required');return locked(db=>{db.exec('CREATE TABLE IF NOT EXISTS local_session(id TEXT PRIMARY KEY,disabled INTEGER NOT NULL)');db.prepare('INSERT INTO local_session VALUES(?,?) ON CONFLICT(id) DO UPDATE SET disabled=excluded.disabled').run(id,disabled?1:0);});},
-  beginPending({brokerUrl,requestId=null,previousRevision}){return locked(()=>{const current=selected();if((current?.revision??null)!==previousRevision)throw Error('selection_conflict');const prior=pending();if(prior&&!prior.cancelled&&(prior.brokerUrl!==brokerUrl||(requestId!==null&&prior.requestId!==null&&prior.requestId!==requestId)))throw Error('pending_selection_conflict');const p={format:'psst-pending-v1',brokerUrl,requestId:requestId??(prior&&!prior.cancelled?prior.requestId:null),previousRevision,cancelled:false};savePrivate(pendingFile,p);return p;});},
+  beginPending({brokerUrl,requestId=null,previousRevision,replacesRequestId}){return locked(()=>{
+   const current=selected();if((current?.revision??null)!==previousRevision)throw Error('selection_conflict');
+   const prior=pending();let active=prior&&!prior.cancelled?prior:null;
+   if(replacesRequestId!==undefined){
+    if(typeof replacesRequestId!=='string'||!replacesRequestId||requestId===replacesRequestId)throw Error('pending_selection_conflict');
+    // Explicit replacement reserves its parent BEFORE the helper may create/POST
+    // a new candidate. Other hosts either join this same child or lose the CAS.
+    if(active?.requestId===replacesRequestId){if(active.brokerUrl!==brokerUrl)throw Error('pending_selection_conflict');active=null;}
+    else if(active&&active.replacesRequestId!==replacesRequestId)throw Error('pending_selection_conflict');
+   }
+   if(active&&(active.brokerUrl!==brokerUrl||(requestId!==null&&active.requestId!==null&&active.requestId!==requestId)))throw Error('pending_selection_conflict');
+   const parent=replacesRequestId??active?.replacesRequestId;
+   const p={format:'psst-pending-v1',brokerUrl,requestId:requestId??active?.requestId??null,previousRevision,cancelled:false,...(parent?{replacesRequestId:parent}:{})};
+   savePrivate(pendingFile,p);return p;
+  });},
   cancel({requestId,state,requestExpiresAt}={}){if(typeof requestId!=='string'||!['denied','expired','revoked'].includes(state)||requestExpiresAt!==undefined&&(typeof requestExpiresAt!=='string'||!Number.isFinite(Date.parse(requestExpiresAt))))throw Error('invalid_terminal_setup_state');return locked(()=>{const p=pending();if(!p||p.cancelled||p.requestId!==requestId)return false;savePrivate(pendingFile,{...p,cancelled:true,terminalState:state,...(requestExpiresAt?{requestExpiresAt}:{})});return true;});},
   commit({requestId,connectionFile,credentialId,previousRevision}){return locked(()=>{const p=pending(),old=selected();if(old?.requestId===requestId&&old.credentialId===credentialId&&old.connectionFile===connectionFile&&old.brokerUrl===p?.brokerUrl)return old;if(!p||p.cancelled||p.requestId!==requestId||(old?.revision??null)!==previousRevision||p.previousRevision!==previousRevision)throw Error('selection_conflict');const config=configReader(connectionFile,{});if(config.enrollment?.credentialId!==credentialId||config.brokerUrl!==p.brokerUrl)throw Error('installation_identity_changed');const s={format:'psst-selected-v1',revision:randomUUID(),connectionFile,credentialId,requestId,brokerUrl:p.brokerUrl};savePrivate(selectedFile,s);savePrivate(pendingFile,{...p,cancelled:true,committedRevision:s.revision});return {...s,config};});}
  };

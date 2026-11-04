@@ -79,7 +79,10 @@ This is local transport recovery, not model polling.
 Unknown/network outcomes retain the same local request/token. Denial, expiry,
 revocation or corrupt state needs explicit attention, never automatic replacement.
 Explicit setup again requests replacement while keeping the old working selection
-until the candidate attaches and the selection compare-and-swap commits. While
+until the candidate attaches and the selection compare-and-swap commits. Each
+replacement records its exact parent request before creating a candidate; lost
+responses resume only that parent’s saved child. Request deadlines constrain
+pending approval, never a separately valid approved credential. While
 replacement is pending, status returns the approval waiter even if the old
 connection is still active, so its completion can re-arm the new inbox.
 

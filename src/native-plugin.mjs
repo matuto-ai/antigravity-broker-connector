@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { NativeBinding, processIdentity, nativeHookContext } from './native-binding.mjs';
 import { prepareStateRoot, readConnectorConfig } from './connector-config.mjs';
-import { openInstallation, installationDirectory, savePrivate } from './installation.mjs';
+import { openInstallation, installationDirectory, savePrivate, readApprovalParent } from './installation.mjs';
 import { createApprovalManager } from './approval-manager.mjs';
 import { pairConnector } from './pairing.mjs';
 import { startNativeSession } from './native-session.mjs';
@@ -82,7 +82,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
     clientId:session?.identity.client_id??null,inboxPath:session?join(session.inbox.directory,'inbox.sqlite'):null});
   try{state();}catch{try{binding.endOwner();}finally{binding.dispose();ownerLock.close();}throw Error('native_state_unavailable');}
   const controller=new AbortController();
-  let rootGeneration=0,transitioning=false,admission=Promise.resolve(),tickPromise;
+  let rootGeneration=0,setupGeneration=0,transitioning=false,admission=Promise.resolve(),tickPromise;
   const activeTools=new Set();
   const currentRoot=(root,generation)=>!closed&&!transitioning&&rootGeneration===generation&&binding.isBound(root);
   const enqueue=fn=>{const task=admission.then(fn);admission=task.then(()=>{},()=>{});return task;};
@@ -93,7 +93,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
   };
   let closing;
   const close=()=>closing??=(async()=>{closed=true;clearInterval(timer);manager?.close();controller.abort();try{await disconnect();await Promise.allSettled([...activeTools,admission,tickPromise,manager?.done].filter(Boolean));}finally{try{binding.endOwner();}catch{}finally{binding.dispose();ownerLock.close();}}})();
-  const api=approvalApi??Object.fromEntries(['beginApproval','pollApproval','readApprovalState'].map(name=>[name,async options=>(await import('../vendor/psst/approval.mjs'))[name](options)]));
+  const api=approvalApi??Object.fromEntries(['beginApproval','pollApproval','readApprovalState'].map(name=>[name,async options=>{const result=await (await import('../vendor/psst/approval.mjs'))[name](options);return result?{...result,parentRequestId:readApprovalParent({...options,requestId:result.requestId})}:null; }]));
   function observedMetadata(config, conversationId){
     const event=binding.rootObservation(conversationId);
     return nativeMetadata(config,event,{host,conversationId});
@@ -110,16 +110,16 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
       recoverySource={conversationId,file,source,expectedEpoch};void tick();
     }
   }
-  async function prepareApproved(file){
+  async function prepareApproved(file,startupSetupGeneration){
     const conversationId=binding.assertHost().conversation,startedEpoch=epoch,startedGeneration=rootGeneration;
     if(!conversationId||closed||!isHostAlive())throw Error('native_host_unavailable');
     const config=configReader(file,{});
     const registrationConfig={...config,metadata:observedMetadata(config,conversationId)};
     let candidate;candidate=await createSession({config:registrationConfig,conversationId,observeMetadata:()=>observedMetadata(config,conversationId),isAlive:()=>isHostAlive()&&rootGeneration===startedGeneration&&binding.isBound(conversationId),signal:controller.signal,onUnavailable:reason=>{void unavailableCandidate(candidate,reason,{conversationId,file,registrationVersion:config.registrationVersion??1}).catch(()=>{});}});
-    if(!currentRoot(conversationId,startedGeneration)||epoch!==startedEpoch){await candidate.close({closeSession:false});throw Error('native_host_unavailable');}
-    return {...candidate,conversationId,rootGeneration:startedGeneration,source:{connection_file:file}};
+    if(!currentRoot(conversationId,startedGeneration)||epoch!==startedEpoch||(startupSetupGeneration!==undefined&&startupSetupGeneration!==setupGeneration)){await candidate.close({closeSession:false});throw Error('native_host_unavailable');}
+    return {...candidate,conversationId,rootGeneration:startedGeneration,startupSetupGeneration,source:{connection_file:file}};
   }
-  async function stageApproved(candidate){if(!currentRoot(candidate.conversationId,candidate.rootGeneration)){await candidate.close({closeSession:false});throw Error('native_root_changed');}const old=session,oldDisabled=disabled,oldReconnectAt=reconnectAt;session=candidate;disabled=false;reconnectAt=0;const stagedEpoch=++epoch;try{state();}catch(error){session=old;disabled=oldDisabled;reconnectAt=oldReconnectAt;throw error;}
+  async function stageApproved(candidate){if(!currentRoot(candidate.conversationId,candidate.rootGeneration)||(candidate.startupSetupGeneration!==undefined&&candidate.startupSetupGeneration!==setupGeneration)){await candidate.close({closeSession:false});throw Error('native_root_changed');}const old=session,oldDisabled=disabled,oldReconnectAt=reconnectAt;session=candidate;disabled=false;reconnectAt=0;const stagedEpoch=++epoch;try{state();}catch(error){session=old;disabled=oldDisabled;reconnectAt=oldReconnectAt;throw error;}
     return {async rollback(){if(epoch===stagedEpoch&&session===candidate){session=old;disabled=oldDisabled;reconnectAt=oldReconnectAt;epoch++;state();}else{try{await old?.close();}catch{}}},async finalize(){try{await old?.close();}catch{/* Selected new session remains usable despite old cleanup failure. */}}};
   }
   async function attachApproved(candidate){const staged=await stageApproved(candidate);await staged.finalize();}
@@ -143,28 +143,29 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
       if(!session&&!connecting&&!disabled&&manager.status.state!=='pending'){
        const selected=installation.selected();if(selected&&(attemptedRevision!==selected.revision||(reconnectAt&&now()>=reconnectAt))){
         if(attemptedRevision!==selected.revision)reconnectFailures=0;
-        attemptedRevision=selected.revision;reconnectAt=0;connecting=true;
-        try{await attachApproved(await prepareApproved(selected.connectionFile));reconnectFailures=0;manager.adopt(selected);}
+        attemptedRevision=selected.revision;reconnectAt=0;connecting=true;const connectionEpoch=epoch,connectionSetupGeneration=setupGeneration;
+        try{await attachApproved(await prepareApproved(selected.connectionFile,connectionSetupGeneration));reconnectFailures=0;if(manager.status.state!=='pending')manager.adopt(selected);}
         catch(error){
-          if(error.retryable!==true||recoveryBlocked||!currentRoot(binding.assertHost().conversation,generation))throw error;
+          if(closed||disabled||epoch!==connectionEpoch||setupGeneration!==connectionSetupGeneration||!currentRoot(binding.assertHost().conversation,generation))return;
+          if(error.retryable!==true||recoveryBlocked)throw error;
           const backoff=Math.min(30000,2000*2**Math.min(reconnectFailures++,4));
           const cooldown=Number.isFinite(error.retryAfterMs)?error.retryAfterMs:Number.isFinite(error.retryAfter)?error.retryAfter*1000:0;
           reconnectAt=now()+Math.max(backoff,Math.min(300000,Math.max(0,cooldown)));
-          manager.reconnect(selected);
+          if(manager.status.state!=='pending')manager.reconnect(selected);
         }finally{connecting=false;}
        }
       }
       if(!approvalResumed&&!disabled&&!installation.setupSuppressed(binding.assertHost().conversation)){approvalResumed=true;await manager.resume();}
-    }catch{if(generation===rootGeneration&&!transitioning)activeManager.attention();}finally{ticking=false;}
+    }catch{if(!closed&&!disabled&&generation===rootGeneration&&!transitioning)activeManager.attention();}finally{ticking=false;}
   }
   timer=setInterval(()=>{void tick();},1000);timer.unref?.();
   const tools={};
   async function execute(def,verified,context){
     if(closed||!isHostAlive())throw Error('native_host_unavailable');
     if(!session&&!['broker_setup','broker_setup_status','broker_connect','broker_disconnect','broker_cancel_setup'].includes(def.name))await tick();
-    if(def.name==='broker_setup'){installation.suppressSetup(verified.conversationId,false);installation.setSessionDisabled(verified.conversationId,false);disabled=false;state();const wasRecoveryBlocked=recoveryBlocked;recoveryBlocked=false;recoverySource=undefined;try{const status=await manager.begin(verified.args.broker_url);return {...status,waiter_command:approvalWaiterCommand(directory),automatic_delivery_certified:false};}catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;}}
+    if(def.name==='broker_setup'){setupGeneration++;approvalResumed=true;installation.suppressSetup(verified.conversationId,false);installation.setSessionDisabled(verified.conversationId,false);disabled=false;state();const wasRecoveryBlocked=recoveryBlocked;recoveryBlocked=false;recoverySource=undefined;try{const status=await manager.begin(verified.args.broker_url);return {...status,waiter_command:approvalWaiterCommand(directory),automatic_delivery_certified:false};}catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;}}
     if(def.name==='broker_setup_status'){await tick();const waiting=['pending','reconnecting'].includes(manager.status.state);return {...manager.status,connector_runtime:CONNECTOR_RUNTIME,connected:Boolean(session),mode:'automatic_required',readiness:session?'native_wakeup_acceptance_unverified':reconnectAt?'reconnecting':'not_connected',...(reconnectAt?{retry_after_ms:Math.max(0,reconnectAt-now())}:{}),...(waiting?{waiter_command:approvalWaiterCommand(directory)}:session?{waiter_command:waiterCommand(directory)}:{})};}
-    if(def.name==='broker_cancel_setup'){installation.suppressSetup(verified.conversationId,true);return manager.cancel();}
+    if(def.name==='broker_cancel_setup'){approvalResumed=true;installation.suppressSetup(verified.conversationId,true);return manager.cancel();}
     if(def.name==='broker_connect') {
       if(connecting)throw Error('native_connect_in_progress');
       const a=verified.args;

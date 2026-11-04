@@ -26,11 +26,11 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
   let result=initial,failures=0,expiresAt=pendingDeadline??(initial?.state==='pending'?initial.requestExpiresAt:undefined);
   if(initialPauseMs){try{await sleep(initialPauseMs,undefined,{signal:controller.signal});}catch{return;}}
   while(current(epoch,p)){
-   if(expiresAt&&Date.parse(expiresAt)<=Date.now()){publish({state:'expired',requestId:p.requestId,requestExpiresAt:expiresAt});installation.cancel({state:'expired',requestId:p.requestId,requestExpiresAt:expiresAt});return;}
+   if((!result||result.state==='pending')&&expiresAt&&Date.parse(expiresAt)<=Date.now()){publish({state:'expired',requestId:p.requestId,requestExpiresAt:expiresAt});installation.cancel({state:'expired',requestId:p.requestId,requestExpiresAt:expiresAt});return;}
    try{
     if(!result)result=await api.pollApproval(options(p));
     if(!current(epoch,p))return;
-    expiresAt=result.requestExpiresAt??expiresAt;await apply(result,p,epoch);if(result.state!=='pending')return;
+    expiresAt=result.state==='pending'?(result.requestExpiresAt??expiresAt):undefined;await apply(result,p,epoch);if(result.state!=='pending')return;
     failures=0;await sleep(pollMs,undefined,{signal:controller.signal});result=null;
    }catch(error){
     if(!alive()||generation!==epoch||controller.signal.aborted)return;
@@ -52,7 +52,7 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
     if(!alive()||generation!==startedGeneration)return status;
     const replacing=existing&&existing.state!=='pending';
     if(prior&&!prior.cancelled&&prior.brokerUrl!==brokerUrl)throw Error('cancel_pending_setup_first');
-    const p=installation.beginPending({brokerUrl,previousRevision:old?.revision??null});
+    const p=installation.beginPending({brokerUrl,previousRevision:old?.revision??null,...(replacing?{replacesRequestId:existing.requestId}:{})});
     controller?.abort();controller=new AbortController();const epoch=++generation;
     let result,retryPause=0;
     try{result=await api.beginApproval({...options(p),...(replacing?{replaceRequestId:existing.requestId}:{})});}
@@ -63,11 +63,11 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
      if(!error.retryable||epoch!==generation||!alive())throw error;
      result=await api.readApprovalState(options(p));
      if(!result||(p.requestId!==null&&result.requestId!==p.requestId)
-       ||(replacing&&result.requestId===existing.requestId))throw error;
+       ||(replacing&&(result.requestId===existing.requestId||result.parentRequestId!==existing.requestId)))throw error;
      retryPause=Math.max(pollMs,Math.min(300000,Number.isFinite(error.retryAfterMs)?error.retryAfterMs:pollMs));
     }
     if(epoch!==generation||!alive()||installation.pending()?.cancelled)return status;
-    const saved=installation.beginPending({...p,requestId:result.requestId});publish(result.state==='approved'?{...result,state:'pending'}:result);launch(saved,retryPause?null:result,result.requestExpiresAt,retryPause);return status;
+    const saved=installation.beginPending({...p,requestId:result.requestId});publish(result.state==='approved'?{...result,state:'pending'}:result);launch(saved,retryPause?null:result,result.state==='pending'?result.requestExpiresAt:undefined,retryPause);return status;
    }finally{busy=false;}
   },
   async resume(){
@@ -75,6 +75,7 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
    const startedGeneration=generation;
    const p=installation.pending();if(!p)return status;if(p.cancelled)return p.terminalState?publish({state:p.terminalState,requestId:p.requestId,...(p.requestExpiresAt?{requestExpiresAt:p.requestExpiresAt}:{})}):status;
    const saved=await api.readApprovalState(options(p));if(!alive()||generation!==startedGeneration)return status;if(!saved)return publish({state:'setup_needed',requestId:p.requestId});
+   if(p.replacesRequestId&&(p.replacesRequestId===saved.requestId||(p.requestId===null&&saved.parentRequestId!==p.replacesRequestId)))return publish({state:'attention_required',requestId:p.requestId});
    if(p.requestId!==null&&p.requestId!==saved.requestId)throw Error('approval_request_mismatch');
    const recovered=p.requestId===null?installation.beginPending({...p,requestId:saved.requestId}):p;
    publish(saved.state==='approved'?{...saved,state:'pending'}:saved);launch(recovered,null,saved.state==='pending'?saved.requestExpiresAt:undefined);return status; // GET only, never beginApproval.
