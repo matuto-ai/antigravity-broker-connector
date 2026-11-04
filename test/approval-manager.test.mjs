@@ -171,22 +171,21 @@ test('cancel during same-host transport recovery fences GET and late selection',
  assert.equal(f.installation.pending().requestId,r.requestId);assert.equal(manager.status.state,'cancelled');manager.close();
 });
 
-test('explicit setup after cancelled late approval reserves and selects one replacement', async t => {
+test('explicit setup after cancelled late approval resumes the same unattached candidate', async t => {
  const f=fixture(t),first=approved(f),next=approved(f),poll=barrier(),entered=barrier();let saved=null,posts=0;
  const api={readApprovalState:()=>saved,beginApproval:options=>{
   posts++;
   if(posts===1){saved={state:'pending',requestId:first.requestId};return saved;}
-  assert.equal(options.replaceRequestId,first.requestId);
-  assert.equal(f.installation.pending().requestId,null);
-  assert.equal(f.installation.pending().replacesRequestId,first.requestId);
-  saved={...next,parentRequestId:first.requestId};return saved;
+  assert.equal(options.replaceRequestId,undefined);
+  assert.equal(f.installation.pending().requestId,first.requestId);
+  return saved;
  },pollApproval:()=>{entered.resolve();return poll.promise;}};
  const manager=createApprovalManager({installation:f.installation,api,sleep:async()=>{},
   activate:{prepare:async()=>({close:async()=>{}}),commit:async()=>{}}});
  await manager.begin('https://broker.example');await entered.promise;manager.cancel();saved=first;poll.resolve(first);await manager.done;
  assert.equal(f.installation.selected(),null);assert.equal(f.installation.pending().requestId,first.requestId);
  await manager.begin('https://broker.example');await manager.done;
- assert.equal(posts,2);assert.equal(f.installation.selected().requestId,next.requestId);manager.close();
+ assert.equal(posts,2);assert.equal(f.installation.selected().requestId,first.requestId);manager.close();
 });
 
 test('lost replacement response resumes only its exact saved child, without another POST', async t => {
@@ -273,4 +272,20 @@ test('explicit replacement of stale approved or revoked authorization does not r
   assert.equal(creates,1);assert.deepEqual(f.installation.selected(),old);assert.equal(f.installation.pending().requestId,next.requestId);
   manager.close();
  }
+});
+
+test('explicit retry after uncertain approved child recovers its reserved lineage without another replacement', async t => {
+ const f=fixture(t),first=approved(f),next={...approved(f),parentRequestId:first.requestId};let saved=first,posts=0;
+ f.installation.beginPending({brokerUrl:'https://broker.example',requestId:first.requestId,previousRevision:null});
+ f.installation.commit({...first,previousRevision:null});
+ const manager=createApprovalManager({installation:f.installation,
+  api:{readApprovalState:()=>saved,beginApproval:options=>{
+   posts++;
+   if(posts===1){assert.equal(options.replaceRequestId,first.requestId);saved=next;throw Error('uncertain_response');}
+   assert.equal(options.replaceRequestId,undefined);return saved;
+  },pollApproval:()=>saved},activate:{prepare:async()=>({close:async()=>{}}),commit:async()=>{}}});
+ await assert.rejects(manager.begin('https://broker.example'),/uncertain_response/);
+ assert.equal(f.installation.pending().requestId,null);
+ await manager.begin('https://broker.example');await manager.done;
+ assert.equal(posts,2);assert.equal(f.installation.selected().requestId,next.requestId);manager.close();
 });

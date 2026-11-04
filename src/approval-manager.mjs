@@ -54,7 +54,8 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
     // An approved candidate that has not been selected is still the same delivery.
     // Retry attachment rather than rotating it on a repeated slash command.
     const attaching=existing?.state==='approved'&&prior&&!prior.cancelled
-      &&prior.requestId===existing.requestId&&status.state!=='cancelled';
+      &&(prior.requestId===existing.requestId
+        ||(prior.requestId===null&&(existing.parentRequestId??null)===(prior.replacesRequestId??null)));
     const replacing=existing&&existing.state!=='pending'&&!attaching;
     if(prior&&!prior.cancelled&&prior.brokerUrl!==brokerUrl)throw Error('cancel_pending_setup_first');
     const p=installation.beginPending({brokerUrl,previousRevision:old?.revision??null,...(replacing?{replacesRequestId:existing.requestId}:{})});
