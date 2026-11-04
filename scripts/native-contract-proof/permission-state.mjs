@@ -29,10 +29,8 @@ export function exactWaiterPermission(screen,{expectedCommand}={}) {
  // Only inert key hints/status may follow the exact four known options. No
  // checkbox, remembered choice, additional control or unrecognized wording.
  const footer=cancel>=0?options.slice(cancel+1).join(' ').replace(/ +/g,' '):'';
- const footerWords=new Set('Navigate Choose choose expand Select select Confirm confirm Accept accept Run run command edit Edit review rerun re-run enter ctrl e g esc Esc cancel to fixture'.split(' '));
- const knownFooter=footer.length>0&&footer.length<160&&/^[A-Za-z0-9 ↑↓/·+.:-]+$/.test(footer)&&
-  (footer.match(/[A-Za-z]+/g)??[]).every(word=>footerWords.has(word));
- const safeWords=new Set("Yes No run command and always allow in this conversation for commands that start with Persist to settings json cancel Navigate Choose choose expand Select select Confirm confirm Accept accept enter ctrl e g esc Esc edit Edit review rerun re-run fixture usr local bin node plugin psst-antigravity-native mjs wait 1 2 3 4".split(' '));
+ const knownFooter=footer==='↑/↓ Navigate · tab Amend · ctrl+g edit/expand command esc to cancel fixture';
+ const safeWords=new Set("Yes No run command and always allow in this conversation for commands that start with Persist to settings json cancel Navigate tab Amend Choose choose expand Select select Confirm confirm Accept accept enter ctrl e g esc Esc edit Edit review rerun re-run fixture usr local bin node plugin psst-antigravity-native mjs wait 1 2 3 4".split(' '));
  const controlShape=options.join('\n').replace(/[A-Za-z0-9_-]+/g,word=>safeWords.has(word)?word:'?').slice(0,2048);
  const keyHint=/^↑\/↓ Navigate · ([A-Za-z0-9+-]{1,8}) ([A-Za-z]{1,10}) · ctrl\+g edit\/expand command esc to cancel fixture$/.exec(footer);
  const footerDiagnostic=exactCommand&&knownChoices&&onceFocused&&keyHint?{key:keyHint[1],label:keyHint[2]}:null;

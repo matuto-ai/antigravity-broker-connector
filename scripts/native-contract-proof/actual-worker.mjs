@@ -155,7 +155,7 @@ const compactPoll=interactive?setInterval(()=>{
      consentEvidence.push({action:'confirm_exact_fixture_waiter_once',screen:current});child.stdin.write('\r');return;
     }
    }catch{permissionDiagnostics={provenanceVerified:false};}
-  }else if(permissionConfirmations===1&&!permissionDismissed&&screen.version===permissionVersion&&Date.now()-permissionSentAt<1000){return;}
+  }else if(permissionConfirmations===1&&!permissionDismissed&&fixture.readEvents().filter(h=>h.event==='PreToolUse'&&h.toolName==='run_command').length===1&&Date.now()-permissionSentAt<1000){return;}
   nativePermissionBlocked=true;timeoutWaiters={inbox:activeWaiters(),approval:activeWaiters('wait-approval')};consentEvidence.push({action:'stop_pending_native_command_permission',screen:current});clearInterval(compactPoll);child.kill('SIGTERM');return;
  }
  if(permissionConfirmations===1&&screen.version>permissionVersion)permissionDismissed=true;

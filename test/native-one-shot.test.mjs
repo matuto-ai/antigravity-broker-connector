@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 test('one-shot run cannot repeat through normal CI, PR duplicates, later pushes or reruns',()=>{
  const workflow=readFileSync(new URL('../.github/workflows/native-waiter-once.yaml',import.meta.url),'utf8');
  assert.match(workflow,/github\.event_name == 'push'/);
- assert.match(workflow,/github\.event\.before == '4673c09f31d27aae6146a57bd2a08490a4f4f6db'/);
+ assert.match(workflow,/github\.event\.before == 'e6e0d522a031251a8c84ec39633a8c67e4b9ef52'/);
  assert.match(workflow,/github\.ref == 'refs\/heads\/feat\/complete-native-qualification'/);
  assert.match(workflow,/github\.run_attempt == 1/);
  assert.doesNotMatch(workflow,/pull_request:|workflow_dispatch:|schedule:|continue-on-error/);

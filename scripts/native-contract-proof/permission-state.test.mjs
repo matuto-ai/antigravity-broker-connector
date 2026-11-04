@@ -12,7 +12,7 @@ test('actual native command permission is a stop boundary, never implicit approv
 import {exactWaiterPermission} from './permission-state.mjs';
 const expected="'/usr/local/bin/node' '/plugin/bin/psst-antigravity-native.mjs' wait '/tmp/proof-home/.config/psst/antigravity/native/18-13757-5a9f1062-b0ab-4fb9-9a61-72f21db5ee2b' '1ae19951-b8c9-436b-9c05-f1d5a196d6f0'";
 const label=expected.slice(0,78)+'...';
-const modal=command=>`Command\nRequesting permission for:\n${command}\nRun this command?\n> 1. Yes, run command\n2. Yes, and always allow in this conversation for commands that start with '${label}'\n3. Yes, and always allow for commands that start with '${label}' (Persist to settings.json)\n4. No, cancel\n↑/↓ Navigate · 1-4 Choose · ctrl+g edit/expand command\nesc to cancel fixture`;
+const modal=command=>`Command\nRequesting permission for:\n${command}\nRun this command?\n> 1. Yes, run command\n2. Yes, and always allow in this conversation for commands that start with '${label}'\n3. Yes, and always allow for commands that start with '${label}' (Persist to settings.json)\n4. No, cancel\n↑/↓ Navigate · tab Amend · ctrl+g edit/expand command\nesc to cancel fixture`;
 test('only exact rendered disposable inbox waiter with one-shot control focused is recognized',()=>{
  assert.equal(exactWaiterPermission(modal(expected),{expectedCommand:expected}).recognized,true);
  assert.equal(exactWaiterPermission(modal(expected.replaceAll("'",'')),{expectedCommand:expected}).recognized,true);
@@ -28,8 +28,8 @@ test('only exact rendered disposable inbox waiter with one-shot control focused 
 });
 
 test('footer diagnostics expose only bounded key hints, never an arbitrary footer',()=>{
- assert.deepEqual(exactWaiterPermission(modal(expected),{expectedCommand:expected}).footerDiagnostic,{key:'1-4',label:'Choose'});
+ assert.deepEqual(exactWaiterPermission(modal(expected),{expectedCommand:expected}).footerDiagnostic,{key:'tab',label:'Amend'});
  for(const replacement of ['12345678-1234-4123-8123-123456789abc','aQp8q0Idmp5vbwW3utK8lH45nm9sPnQ','[x] Remember']){
-  assert.equal(exactWaiterPermission(modal(expected).replace('1-4 Choose',replacement),{expectedCommand:expected}).footerDiagnostic,null);
+  assert.equal(exactWaiterPermission(modal(expected).replace('tab Amend',replacement),{expectedCommand:expected}).footerDiagnostic,null);
  }
 });
