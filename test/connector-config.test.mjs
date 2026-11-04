@@ -16,4 +16,3 @@ test('config accepts private common bundle; rejects permissive, linked, insecure
   const link=join(dir,'link');symlinkSync(path,link);assert.throws(()=>readConnectorConfig(link,{}));
   for(const override of [{broker_url:'http://broker.example'},{token_file:'../token'},{allowed_client_types:['pi']},{authorization_scheme:'Basic'},{surprise:true}]){write({...bundle,...override});assert.throws(()=>readConnectorConfig(path,{}));}
 });
-
