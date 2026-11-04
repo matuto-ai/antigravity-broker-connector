@@ -1,9 +1,11 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {actualProviderStep,actualResponseDiagnostics,nativeNoticeShape} from './actual-provider-step.mjs';
+import {actualProviderStep as step,actualResponseDiagnostics,nativeNoticeShape} from './actual-provider-step.mjs';
+const expectedRuntime={name:'fixture-connector',version:'9.8.7'};
+const actualProviderStep=(input,state)=>step(input,state,expectedRuntime);
 const tools=[{functionDeclarations:[{name:'call_mcp_tool',parameters:{properties:{ServerName:{type:'string'},ToolName:{type:'string'},Arguments:{type:'object'}}}}]}];
 const nativePrefix='Created At: 2026-11-03T00:56:00Z\nCompleted At: 2026-11-03T00:56:01Z\nA pre-tool hook changed the arguments of this tool call before it ran. Changed: Arguments.\n\n';
 const model=tool=>({role:'model',parts:[{functionCall:{name:'call_mcp_tool',args:{ServerName:'psst-native_psst',ToolName:tool,Arguments:{}}}}]});
-const input=response=>({tools,contents:response?[model(response.native_session_binding?'broker_identity':'broker_setup_status'),{role:'user',parts:[{functionResponse:{name:'call_mcp_tool',response:{output:nativePrefix+JSON.stringify(response)}}}]}]:[]});
+const input=response=>({tools,contents:response?[model(response.native_session_binding?'broker_identity':'broker_setup_status'),{role:'user',parts:[{functionResponse:{name:'call_mcp_tool',response:{output:nativePrefix+JSON.stringify(response.native_session_binding?response:{connector_runtime:expectedRuntime,...response})}}}]}]:[]});
 test('only real status then identity and projects safe identity fields',()=>{
  const first=actualProviderStep(input(),{sent:0,completed:0});assert.equal(first.parts[0].functionCall.args.ToolName,'broker_setup_status');
  const second=actualProviderStep(input({connected:true,mode:'automatic_required'}),first.state);assert.equal(second.parts[0].functionCall.args.ToolName,'broker_identity');
@@ -15,6 +17,10 @@ test('refuses missing schema, missing response, disconnected status, synthetic i
  assert.throws(()=>actualProviderStep(input(),{sent:1,completed:0}),/missing native/);
  assert.throws(()=>actualProviderStep(input({connected:false}),{sent:1,completed:0}),/not connected/);
  assert.throws(()=>actualProviderStep(input({client_id:'fake',native_session_binding:true}),{sent:2,completed:1}),/identity response/);
+});
+test('native qualification fails on missing or stale running connector metadata',()=>{
+ for(const connector_runtime of [undefined,{...expectedRuntime,version:'0.1.1'},{...expectedRuntime,name:'other'}, {...expectedRuntime,extra:'unexpected'}])assert.throws(()=>actualProviderStep(input({connected:true,mode:'automatic_required',connector_runtime}),{sent:1,completed:0}),/runtime mismatch/);
+ assert.throws(()=>step(input(),{sent:0,completed:0}),/expected connector runtime required/);
 });
 
 test('native no-tools warmup is benign without advancing state; pending response still required',()=>{
@@ -86,5 +92,5 @@ test('recorded native envelope shape uses exact real UTC calendar timestamps',as
  assert.deepEqual(decodeNativeToolResponse(record.response),{connected:true,mode:'automatic_required'});
  for(const stamp of ['00:56:00','2026-02-30T00:56:00Z','2026-13-01T00:56:00Z','2026-11-03T00:56:00.123Z','2026-11-03T00:56:00+00:00','2026-11-03X00:56:00Z'])assert.throws(()=>decodeNativeToolResponse({output:record.response.output.replace('2026-11-03T00:56:00Z',stamp)}));
  assert.throws(()=>decodeNativeToolResponse({output:record.response.output.replace('Arguments.\n\n','Arguments.\n')}));
- const request=input({connected:true,mode:'automatic_required'});request.contents[1].parts[0].functionResponse.response=record.response;const next=actualProviderStep(request,{sent:1,completed:0});assert.equal(next.parts[0].functionCall.args.ToolName,'broker_identity');
+ const request=input({connected:true,mode:'automatic_required'});request.contents[1].parts[0].functionResponse.response=record.response;assert.throws(()=>actualProviderStep(request,{sent:1,completed:0}),/runtime mismatch/,'historical envelope without runtime metadata is not current qualification');
 });

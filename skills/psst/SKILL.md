@@ -9,6 +9,10 @@ enroll automatically. Approved saved configuration reconnects through the native
 session hook; no secret/path input is needed each session. List recipients with
 broker_list_clients and use their exact IDs, never names, for broker_send.
 
+For an installation/upgrade check, report connector_runtime.version from that
+status result. It describes the running MCP package's startup metadata, not the
+native host version, loaded hooks/skills or automatic-delivery certification.
+
 When connected, arm the returned waiter_command once via native run_command,
 WaitMsBeforeAsync=500. End the turn.
 An agent-message completion notice is not receipt or permission: call broker_receive,

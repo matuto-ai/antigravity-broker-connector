@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
 import { readConnectorConfig } from '../src/connector-config.mjs';
 import { startConnector } from '../src/connector.mjs';
+import packageInfo from '../package.json' with { type: 'json' };
 import { httpFixture, registration, sendBody } from '../../ai-agent-msg-broker/test/helpers.mjs';
 
 function files(t) { const dir=mkdtempSync(join(tmpdir(),'psst-connector-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));return dir; }
@@ -34,7 +35,7 @@ test('standalone MCP handshake, two-message FIFO, explicit ACK, reply and host-c
  const broker=await httpFixture(t),dir=files(t),tokenFile=join(dir,'token');writeFileSync(tokenFile,broker.b.token,{mode:0o600});
  const sender=registration('pi');await broker.request('/v1/sessions',{method:'POST',body:sender});
  const rpc=rpcStreams();const connector=await startConnector({config:{brokerUrl:broker.base,tokenFile,stateRoot:join(dir,'state'),insecureDevelopment:true,metadata:{name:'Antigravity',model:{provider:null,id:null,source:'unknown'},project:null}},...rpc});t.after(()=>connector.close());
- const init=await rpc.call('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'fixture',version:'1'}});assert.equal(init.result.serverInfo.name,'antigravity-broker-connector');assert.equal(init.result.serverInfo.version,'0.1.1');rpc.notify('notifications/initialized',{});
+ const init=await rpc.call('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'fixture',version:'1'}});assert.equal(init.result.serverInfo.name,'antigravity-broker-connector');assert.equal(init.result.serverInfo.version,packageInfo.version);rpc.notify('notifications/initialized',{});
  const tools=await rpc.call('tools/list',{});assert.equal(tools.result.tools.length,11);
  const tool=async(name,args={})=>{const r=await rpc.call('tools/call',{name,arguments:args});assert(!r.error,JSON.stringify(r));return JSON.parse(r.result.content[0].text);};
  assert.equal((await tool('broker_identity')).client_id,connector.identity.client_id);

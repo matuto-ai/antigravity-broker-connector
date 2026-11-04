@@ -8,6 +8,7 @@ import {PassThrough,Writable} from 'node:stream';
 import {serveNativePlugin} from '../src/native-plugin.mjs';
 import {processIdentity} from '../src/native-binding.mjs';
 import {openInstallation} from '../src/installation.mjs';
+import packageInfo from '../package.json' with {type:'json'};
 import {httpFixture,registration,sendBody} from '../../ai-agent-msg-broker/test/helpers.mjs';
 const meta=(root,self=root)=>({'antigravity.google/conversation_id':self,'antigravity.google/root_conversation_id':root});
 const until=async fn=>{for(let i=0;i<200;i++){if(fn())return;await new Promise(r=>setTimeout(r,5));}throw Error('fixture timeout');};
@@ -38,6 +39,19 @@ test('verified root A B C get isolated fresh owners, pause old journal and fence
  await f.call(c,'broker_setup_status');
  assert.equal(new Set(f.sessions.map(e=>e.identity.client_id)).size,3);
  assert.deepEqual(f.sessions[1].closes,[{closeSession:false}]);
+});
+test('native setup status reports running connector metadata without setup or readiness claims',async t=>{
+ const f=await fixture(t,{saved:false}),root=randomUUID();
+ const status=await f.call(root,'broker_setup_status');
+ assert.deepEqual(status.connector_runtime,{name:packageInfo.name,version:packageInfo.version});
+ assert.equal(status.connected,false);assert.equal(status.readiness,'not_connected');
+ assert.equal(f.sessions.length,0);assert.equal(f.installation.pending(),null);
+ await f.server.close();
+ const restarted=await serveNativePlugin({...f.options,input:new PassThrough(),output:new PassThrough()});t.after(()=>restarted.close());
+ const args=restarted.binding.issue({context:{host:f.host,conversationId:root},tool:'broker_setup_status',args:{}});
+ const next=await restarted.tools.broker_setup_status(args,{nativeMeta:meta(root)});
+ assert.deepEqual(next.connector_runtime,status.connector_runtime);
+ assert.equal(next.connected,false);assert.equal(f.installation.pending(),null);
 });
 test('child metadata and missing transport metadata cannot select even with provisional hook permit',async t=>{
  const f=await fixture(t),root=randomUUID(),child=randomUUID();

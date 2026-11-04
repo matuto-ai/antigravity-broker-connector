@@ -24,6 +24,11 @@ test('release provisions the same immutable approval TLS fixture as regular CI',
   assert.equal(approvalCheckout(release), approvalCheckout(ci));
   assert.match(read('./approval-tls.test.mjs'), /\.\.\/\.\.\/psst-approval\/test\/approval-tls-fixture\.mjs/);
   assert.match(release, /npm run check && npm test && npm run test:pack/);
+  assert.match(release, /candidate-artifact\.mjs prepare "\$PWD" "\$RUNNER_TEMP\/antigravity-candidate" --require-clean/);
+  assert.match(release, /candidate-artifact\.mjs tarball-path "\$PWD" "\$PSST_CANDIDATE_DIR" --require-clean/);
+  assert.match(release, /npm publish "\$package_file" --access public --provenance --ignore-scripts/);
+  assert.doesNotMatch(release, /npm publish --access/);
+  assert.match(release, /verify-published-artifact\.mjs "\$PWD" "\$PSST_CANDIDATE_DIR"/);
 });
 
 test('release fixture guard rejects the previously missing checkout', () => {

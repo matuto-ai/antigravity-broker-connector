@@ -1,18 +1,31 @@
 # Verification stages
 
-`.github/workflows/verify.yaml` runs one `verify` job with five ordered stages:
+`.github/workflows/verify.yaml` runs one `verify` job with seven ordered stages:
 
 1. **Check source syntax**: parse source and test files without executing them.
-2. **Run local tests**: deterministic component and metadata checks (`npm run test:local`).
-3. **Verify native host and protocol integration**: local broker, HTTP/TLS and MCP/runtime fixtures (`npm run test:integration`). This stage also validates and installs the plugin using the pinned official Antigravity CLI in a disposable home, without login.
-4. **Verify container persistence**: destroy and recreate real Docker containers while retaining only the approved installation volume.
-5. **Verify installable package**: pack, install offline into a temporary directory, and check the distributed entry points and metadata (`npm run test:pack`).
+2. **Build and verify current package**: require a clean checkout of the workflow's exact commit, pack it once with scripts disabled, install the tarball offline, and compare every packaged file with the source snapshot. Log commit/tree, package/plugin version, source digest and tarball SHA-256/SHA-512.
+3. **Run local tests**: deterministic component and metadata checks (`npm run test:local`) against a test directory assembled from that installed artifact, not repository runtime symlinks.
+4. **Verify native host and protocol integration**: local broker, HTTP/TLS and MCP/runtime fixtures (`npm run test:integration`) against the same artifact. This stage also validates and installs it using the pinned official Antigravity CLI in a disposable home, without login.
+5. **Verify container persistence**: destroy and recreate real Docker containers running the verified artifact while retaining only the approved installation volume.
+6. **Verify installable package**: reuse the same tarball installation and check distributed entry points and running MCP metadata (`npm run test:pack`).
+7. **Verify unconfirmed native execution boundary**: mount the complete artifact read-only, verify its bytes inside the isolated container, and require matching runtime metadata. Ordinary CI submits zero waiter confirmations and does not claim full automatic-delivery acceptance.
 
 The local, integration and package test selections are disjoint where applicable;
 `test/verify-stages.test.mjs` guards complete coverage and stable stage names.
-`npm test` retains its existing developer behavior. Docker runs separately from
-local tests. The connector-specific implementation inside each stage is not
+`npm test` runs all unit/integration tests through the same automatic artifact
+assembly. Developer runs can test explicitly recorded uncommitted changes; CI
+requires a clean checkout. Existing candidates fail verification if source HEAD,
+source content, package bytes, tarball bytes or runtime versions diverge. Missing
+published files cannot be silently supplied by the repository. Only test/support
+files and the three existing diagnostic-only launcher bins are copied alongside
+the artifact. Broker fixtures remain separately pinned and verified. Docker runs
+separately from local tests. The connector-specific implementation inside each stage is not
 interchangeable with another host's API.
+
+The release workflow publishes the exact tested tarball, then automatically
+checks its registry name, version, integrity and `latest` tag. It does not repack
+the checkout after testing. Current source, public npm release and installed user
+runtime are separate observations; no mutable npm tag selects code for CI.
 
 Passing these checks does not prove authenticated native-model receipt or the
 user's actual UI. Real-client acceptance remains a separate pilot. No VM,

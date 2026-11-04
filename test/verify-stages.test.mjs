@@ -14,7 +14,11 @@ test('verify stages cover every local test exactly once with explicit container 
  const workflow=readFileSync(new URL('../.github/workflows/verify.yaml',import.meta.url),'utf8');
  assert.match(workflow,/^  verify:$/m);
  const names=[...workflow.matchAll(/^      - name: (.+)$/gm)].map(match=>match[1]);
- assert.deepEqual(names,['Check source syntax','Run local tests','Verify native host and protocol integration','Verify container persistence','Verify installable package','Verify unconfirmed native execution boundary']);
+ assert.deepEqual(names,['Check source syntax','Build and verify current package','Run local tests','Verify native host and protocol integration','Verify container persistence','Verify installable package','Verify unconfirmed native execution boundary']);
+ assert.match(workflow,/test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/);
+ assert.match(workflow,/candidate-artifact\.mjs prepare "\$PWD" "\$RUNNER_TEMP\/antigravity-candidate" --require-clean/);
+ const runner=readFileSync(new URL('../scripts/test-stage.mjs',import.meta.url),'utf8');
+ assert.match(runner,/createTestProjection/);assert.match(runner,/verifyTestProjection/);assert.match(runner,/cwd:projection/);
  assert.match(workflow,/run-actual\.sh "\$PWD" baseline/);
  assert.match(workflow,/run-actual\.sh "\$PWD" permission-boundary/);
  assert.doesNotMatch(workflow,/continue-on-error|allow-failure/);

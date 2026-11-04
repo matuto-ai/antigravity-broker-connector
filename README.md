@@ -137,6 +137,12 @@ and requires the pinned broker checkout alongside this repository. Runtime
 installation does not. CI provisions the checkout automatically. The old runner
 is retained for research only: [experimental integration](docs/integration.md).
 
+Tests automatically pack the current checkout and execute its installed runtime
+bytes, with matching package/plugin/MCP versions and source/artifact hashes.
+Omitted files, stale candidates or changed bytes fail the gate. CI reuses one
+artifact for unit/integration, native-manager, Docker and package checks; the
+release workflow publishes that tested tarball and verifies the registry receipt.
+
 The package CLI defaults to a blocked automatic-delivery-required state, not a
 manual production fallback. `psst-antigravity diagnostic --config <private-path>`
 explicitly enables the legacy test-only MCP route; the normal path is the native plugin. [Release checklist](docs/release.md) explains the npm trusted
@@ -157,4 +163,4 @@ message or guarantee an always-open card. See [format, compatibility and limits]
 
 ## Verification
 
-See [the five verification stages](docs/verification.md) for what the shared `verify` job checks and what still needs a real-client pilot.
+See [the verification stages](docs/verification.md) for what the shared `verify` job checks and what still needs a real-client pilot.

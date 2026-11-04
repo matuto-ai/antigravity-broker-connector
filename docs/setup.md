@@ -44,6 +44,21 @@ native manager copies plugin files into its managed directory. For updates, keep
 the npm prefix and use the native manager's normal update/install action; do not
 overwrite its managed copy. Verify exact version after restart before setup.
 
+In the current native TUI, `/plugin list` shows the installed plugin. Outside an
+active session, the official CLI also supports `agy plugin list --json`, including
+enabled state, version and installation path. `agy` is the official command name;
+finding it on PATH does not establish a separate custom wrapper. The default
+doctor does not run either manager or claim import permission from a listing.
+
+After the supported restart, `broker_setup_status` reports
+`connector_runtime.name` and `connector_runtime.version` from the executing MCP
+package's startup metadata. Compare that version with the intended update. An
+already-running process retains its startup version when files on disk change;
+replacing the package alone does not reload it. This observation does not attest
+package bytes, enabled hooks/skills, the native host's version, import permission
+or automatic delivery. Missing setup remains missing; a version check never
+creates an enrollment request.
+
 1. In Antigravity invoke `/psst-setup`; provide only the HTTPS broker URL.
 2. The administrator approves the displayed request ID in the broker's login-form
    UI. There is no token/password to paste into the conversation.
@@ -137,9 +152,12 @@ route remains experimental, not a certified production automatic-receive claim.
 Sources: https://www.antigravity.google/docs/plugins and
 https://www.antigravity.google/docs/hooks (checked2026-10-26).
 
-### Targeted bootstrap review checklist (not applied)
+### Historical sandbox-specific bootstrap review (conditional, not applied)
 
-Keep `agy-policy.py` rejection of arbitrary project/global integrations. The
+The following applies only if a deployment is positively identified as using the
+archived sandbox policy above. It is not a prerequisite for the official CLI or
+a requirement to build a new wrapper/status API. Preserve that deployment's
+`agy-policy.py` rejection of arbitrary project/global integrations. The
 narrow addition would allow exactly the reviewed `psst-native` plugin under the
 native manager's installation directory, with a pinned package/digest and its
 known `plugin.json`, `hooks.json`, `mcp_config.json`, two skills and runtime files.

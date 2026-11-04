@@ -15,6 +15,7 @@ import { createApprovalManager } from './approval-manager.mjs';
 import { pairConnector } from './pairing.mjs';
 import { startNativeSession } from './native-session.mjs';
 import { serveStdio, TOOL_DEFINITIONS } from './mcp-stdio.mjs';
+import { CONNECTOR_RUNTIME } from './runtime-info.mjs';
 
 export const NATIVE_SERVER = 'psst-native_psst';
 export const nativeBase = () => join(homedir(),'.config','psst','antigravity','native');
@@ -32,7 +33,7 @@ function save(path,data) { const tmp=`${path}.${randomUUID()}.tmp`;writeFileSync
 const shape=properties=>({type:'object',properties,required:[],additionalProperties:false});
 export const NATIVE_DEFINITIONS=[
  {name:'broker_setup',description:'Explicit one-time setup: provide only the HTTPS broker URL. Generates a private local candidate and requests broker-admin approval; no secret/file handoff.',inputSchema:{...shape({broker_url:{type:'string',maxLength:2048}}),required:['broker_url']}},
- {name:'broker_setup_status',description:'Show public setup/approval state; never exposes credentials or creates a request.',inputSchema:shape({})},
+ {name:'broker_setup_status',description:'Show public setup/approval state and running connector package version; never exposes credentials or creates a request. Version is not native-host or delivery certification.',inputSchema:shape({})},
  {name:'broker_cancel_setup',description:'Cancel local pending setup/resume, keeping existing approved authorization.',inputSchema:shape({})},
  {name:'broker_connect',description:'Explicitly connect this native conversation using a PRIVATE pairing_file path or connection_file path, never secret text. Experimental native wakeup is not certified.',inputSchema:shape({pairing_file:{type:'string',maxLength:4096},connection_file:{type:'string',maxLength:4096}})},
  {name:'broker_disconnect',description:'Disconnect this conversation and cancel its waiter. Does not revoke the installation credential.',inputSchema:shape({})},
@@ -153,7 +154,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
     if(closed||!isHostAlive())throw Error('native_host_unavailable');
     if(!session&&!['broker_setup','broker_setup_status','broker_connect','broker_disconnect','broker_cancel_setup'].includes(def.name))await tick();
     if(def.name==='broker_setup'){installation.suppressSetup(verified.conversationId,false);installation.setSessionDisabled(verified.conversationId,false);disabled=false;state();const wasRecoveryBlocked=recoveryBlocked;recoveryBlocked=false;recoverySource=undefined;try{const status=await manager.begin(verified.args.broker_url);return {...status,waiter_command:approvalWaiterCommand(directory),automatic_delivery_certified:false};}catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;}}
-    if(def.name==='broker_setup_status'){await tick();return {...manager.status,connected:Boolean(session),mode:'automatic_required',readiness:session?'native_wakeup_acceptance_unverified':'not_connected',...(session?{waiter_command:waiterCommand(directory)}:manager.status.state==='pending'?{waiter_command:approvalWaiterCommand(directory)}:{})};}
+    if(def.name==='broker_setup_status'){await tick();return {...manager.status,connector_runtime:CONNECTOR_RUNTIME,connected:Boolean(session),mode:'automatic_required',readiness:session?'native_wakeup_acceptance_unverified':'not_connected',...(session?{waiter_command:waiterCommand(directory)}:manager.status.state==='pending'?{waiter_command:approvalWaiterCommand(directory)}:{})};}
     if(def.name==='broker_cancel_setup'){installation.suppressSetup(verified.conversationId,true);return manager.cancel();}
     if(def.name==='broker_connect') {
       if(connecting)throw Error('native_connect_in_progress');
