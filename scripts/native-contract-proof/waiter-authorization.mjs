@@ -1,6 +1,7 @@
 // Fixed, test-only authorization plans. No arbitrary budget, extra phase or retry.
 export function waiterAuthorizationPlan(mode,flag) {
  if(flag===undefined)return [];
+ if(flag==='--expect-permission-boundary'&&['idle','setup','busy'].includes(mode))return [];
  if(flag==='--confirm-remaining-setup'&&mode==='setup')return ['approval','inbox'];
  if(flag==='--confirm-waiter-once'&&mode==='idle')return ['inbox'];
  if(flag==='--confirm-authorized-matrix'){

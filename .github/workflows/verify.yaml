@@ -50,6 +50,6 @@ jobs:
       - name: Verify installable package
         run: npm run test:pack
         working-directory: antigravity-review-pair
-      - name: Verify automatic native setup and arrival
-        run: bash scripts/native-contract-proof/run-actual.sh "$PWD" automatic
+      - name: Verify unconfirmed native execution boundary
+        run: bash scripts/native-contract-proof/run-actual.sh "$PWD" permission-boundary
         working-directory: antigravity-review-pair

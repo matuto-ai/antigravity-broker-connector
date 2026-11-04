@@ -29,3 +29,14 @@ test('automatic broker stimulus cannot fall through to interactive compact comma
  assert(gate<compact&&compact<worker.indexOf("child.stdin.write(mode==='new'",compact));
  assert.match(worker,/processIdentity\(snap\.connectorProcess\.pid\)/);
 });
+
+test('normal CI checks only the unconfirmed boundary; full native arrival remains an explicit gate',()=>{
+ const normal=readFileSync(new URL('../.github/workflows/verify.yaml',import.meta.url),'utf8');
+ assert.match(normal,/Verify unconfirmed native execution boundary/);assert.match(normal,/"\$PWD" permission-boundary/);
+ const runner=readFileSync(new URL('../scripts/native-contract-proof/run-actual.sh',import.meta.url),'utf8');
+ assert.match(runner,/automatic\) modes=\(idle setup busy\);;/);
+ assert.match(runner,/permission-boundary\) modes=\(idle setup busy\); extra_args=\(--expect-permission-boundary\);;/);
+ const worker=readFileSync(new URL('../scripts/native-contract-proof/actual-worker.mjs',import.meta.url),'utf8');
+ assert.match(worker,/if\(expectPermissionBoundary\)\{assert\(permissionBoundaryVerified/);
+ assert.match(worker,/assert\(expectedWakeupVerified/);
+});

@@ -2,7 +2,7 @@
 import {prepareActualPluginFixture} from './actual-plugin-fixture.mjs';
 import {actualCompactContinuity,actualRootRotation,matchingIdleStop} from './actual-compact-state.mjs';
 import {presenceProviderStep} from './presence-provider-step.mjs';
-import {pendingNativeCommandPermission,exactWaiterPermission} from './permission-state.mjs';
+import {pendingNativeCommandPermission,exactWaiterPermission,nativePermissionBoundaryVerified} from './permission-state.mjs';
 import {setupProviderStep} from './setup-provider-step.mjs';
 import {waiterAuthorizationPlan,expectedWaiterPhase} from './waiter-authorization.mjs';
 import {stoppedNativeWaiter,completedNativeDelivery} from './waiter-boundary.mjs';
@@ -37,6 +37,8 @@ writeFileSync(home+'/.gemini/config/hooks.json',JSON.stringify(fixture.hooks));
 writeFileSync(home+'/.gemini/config/mcp_config.json',JSON.stringify(fixture.mcp));
 let turn={sent:0,completed:0},presenceState={sent:0,completed:0},presenceProof=null,messageState={sent:0,completed:0},messageProof=null,messageBoundaries=[],providerFailure=null,providerDiagnostics=null;const requests=[],identities=[],snapshots=[];
 const confirmationPlan=waiterAuthorizationPlan(mode,process.argv[3]);
+const expectPermissionBoundary=process.argv[3]==='--expect-permission-boundary';
+let boundaryObservation=null,permissionOwner=null;
 const setupFirstDeliveryOnly=mode==='setup'&&process.argv[3]==='--confirm-remaining-setup';
 let firstDeliveryStopped=false;
 const oneShotAuthorized=confirmationPlan.length>0;
@@ -118,13 +120,15 @@ writeFileSync(home+'/.gemini/antigravity-cli/settings.json',JSON.stringify({perm
 const setupPrompt=`Set up Psst using only ${fixture.brokerUrl}. Arm the approval waiter and end the turn. Continue only on native completion, then identify, arm inbox waiter and handle the disposable incoming message fixture.`;
 const idlePrompt='Read broker_setup_status then broker_identity, arm its waiter_command with run_command WaitMsBeforeAsync=500 and end the turn. For an automatic Psst notice, run the exact disposable message fixture and re-arm. Do not run other commands.';
 const messagePrompt='Use call_mcp_tool for broker_setup_status and broker_identity, then the exact disposable message fixture: broker_send once, broker_receive twice, broker_acknowledge twice for that received ID, and broker_receive to verify empty. Do not run commands or other tools.';
-const columns=oneShotAuthorized?360:120,rows=oneShotAuthorized?60:40;
+const columns=oneShotAuthorized||expectPermissionBoundary?360:120,rows=oneShotAuthorized||expectPermissionBoundary?60:40;
 const nativeArgs=['--model','fixture','--print',mode==='messages'?messagePrompt:'Read broker_setup_status then broker_identity using call_mcp_tool, then stop. Do not run commands or other tools.','--output-format','json','--print-timeout','20s'];const child=spawn(interactive?'script':'/native/antigravity',interactive?['-q','-e','-c',`stty cols ${columns} rows ${rows}; /native/antigravity --model fixture --prompt-interactive '${mode==='setup'?setupPrompt:['idle','busy'].includes(mode)?idlePrompt:'Read broker_setup_status then broker_identity using call_mcp_tool, then stop. Do not run commands or other tools.'}'`,'/dev/null']:nativeArgs,{cwd:root,env:{HOME:home,PATH:'/usr/local/bin:/usr/bin:/bin',TMPDIR:'/tmp',GEMINI_API_KEY:'offline-fixture-only',GOOGLE_GEMINI_BASE_URL:url,TERM:'xterm-256color'},stdio:[interactive?'pipe':'ignore','pipe','pipe']});const screen=new TerminalScreen(columns,rows);let lastScreenChange=Date.now(),previousScreen='';let outBytes=0,err='',overflow=false,timedOut=false,parserFailed=false;child.stdout.on('data',b=>{lastScreenChange=Date.now();outBytes+=b.length;if(outBytes>(['idle','setup','busy'].includes(mode)?262144:65536)){overflow=true;child.kill('SIGKILL');return;}try{screen.write(b).catch(error=>{parserFailed=true;err+='terminal_parser_failed:'+error.message;child.kill('SIGKILL');});}catch(error){parserFailed=true;err+='terminal_parser_failed:'+error.message;child.kill('SIGKILL');return;}const current=screen.text();if(current!==previousScreen)previousScreen=current;});child.stderr.on('data',b=>{lastScreenChange=Date.now();err+=b;if(err.length>65536){overflow=true;child.kill('SIGKILL');}});let collectionToggleSent=false,collectionUnchecked=false,termsAccepted=false,termsAcceptanceSent=false,consentBlocked=false,acceptScreenVersion=0;const consentEvidence=[];let trustConfirmationSent=false,trustPromptDismissed=false,trustScreenVersion=-1,trustSentAt=0;let navigationSteps=0,navigationFocus=null,navigationVersion=-1,navigationSentAt=0;let themeSelected=false,compactIssued=false,probeIssued=false,stoppedAfterCompact=false;let commandVersion=-1,probeHookStart=-1;const compactTimers=[];
 function activeWaiters(subcommand='wait'){let count=0;for(const pid of readdirSync('/proc').filter(n=>/^[0-9]+$/.test(n))){try{const args=readFileSync('/proc/'+pid+'/cmdline','utf8').split('\0');if(args[1]==='/plugin/bin/psst-antigravity-native.mjs'&&args[2]===subcommand)count++;}catch{}}return count;}
 // Reconstruct only the exact command issued by the real native PreToolUse hook.
 // Tokens remain in memory and the existing private binding DB, never proof logs.
-function verifiedPermissionCommand(){
- const phase=expectedWaiterPhase(confirmationPlan,permissionConfirmations,{mode,setup:setupState,approval:approvalWaiterState,approvalGranted,turn,inbox:waiterState,messages:messageState,messageTools:MESSAGE_TOOLS.length,rearm:rearmState,idleSeeded,busyInjection});
+function verifiedPermissionCommand({observationOnly=false}={}){
+ assert(!observationOnly||expectPermissionBoundary,'observation_mode_required');
+ const plan=observationOnly?(mode==='setup'?['approval']:['inbox']):confirmationPlan;
+ const phase=expectedWaiterPhase(plan,permissionConfirmations,{mode,setup:setupState,approval:approvalWaiterState,approvalGranted,turn,inbox:waiterState,messages:messageState,messageTools:MESSAGE_TOOLS.length,rearm:rearmState,idleSeeded,busyInjection});
  assert(phase,'native_waiter_phase_not_authorized');
  const history=fixture.readEvents().filter(h=>h.event==='PreToolUse'&&h.toolName==='run_command');
  assert.equal(history.length,permissionConfirmations+1);
@@ -163,6 +167,7 @@ function verifiedPermissionCommand(){
  const command=original+` '${permit.token}'`;
  const digest=createHash('sha256').update(command).digest('hex');assert.equal(digest,observed.commandDigest);
  assert.equal(activeWaiters()+activeWaiters('wait-approval'),0);
+ permissionOwner={host:owner.host,connectorProcess:owner.connectorProcess};
  return {command,phase,digest,hookCount:history.length};
 }
 
@@ -206,6 +211,12 @@ const compactPoll=interactive?setInterval(()=>{
  if(['idle','setup','busy'].includes(mode)&&pendingNativeCommandPermission(current,{trustSent:trustConfirmationSent,commandObserved:fixture.readEvents().some(h=>h.event==='PreToolUse'&&h.toolName==='run_command')})){
   const commandCount=fixture.readEvents().filter(h=>h.event==='PreToolUse'&&h.toolName==='run_command').length;
   if(permissionConfirmations>0&&!permissionDismissed&&commandCount===permissionHookCount&&Date.now()-permissionSentAt<1000)return;
+  if(expectPermissionBoundary){
+   try{
+    const verified=verifiedPermissionCommand({observationOnly:true});permissionDiagnostics=exactWaiterPermission(current,{expectedCommand:verified.command});
+    boundaryObservation={provenanceVerified:true,commandCount:verified.hookCount,promptRecognized:permissionDiagnostics.recognized};
+   }catch{boundaryObservation={provenanceVerified:false};}
+  }
   if(oneShotAuthorized&&permissionConfirmations<confirmationPlan.length){
    try{
     const verified=verifiedPermissionCommand();permissionDiagnostics=exactWaiterPermission(current,{expectedCommand:verified.command});
@@ -264,7 +275,8 @@ const expectedExit=[0,130].includes(code)||fixtureShutdownRequested&&nativeSigna
 let shutdownVerified=true;
 if(['idle','setup','busy'].includes(mode)){
  const until=Date.now()+3000;
- const connectorAlive=()=>snapshots.some(s=>{try{const stat=readFileSync('/proc/'+s.connectorProcess.pid+'/stat','utf8');return stat.slice(stat.lastIndexOf(')')+2).trim().split(/\s+/)[19]===s.connectorProcess.start;}catch{return false;}});
+ const observedProcesses=[...snapshots,...(permissionOwner?[permissionOwner]:[])].flatMap(s=>[s.host,s.connectorProcess]);
+ const connectorAlive=()=>observedProcesses.some(p=>{try{const raw=readFileSync('/proc/'+p.pid+'/stat','utf8'),stat=raw.slice(raw.lastIndexOf(')')+2).trim().split(/\s+/);return stat[0]!=='Z'&&stat[19]===p.start;}catch{return false;}});
  while(Date.now()<until&&(activeWaiters()+activeWaiters('wait-approval')>0||connectorAlive()))await new Promise(resolve=>setTimeout(resolve,20));
  shutdownVerified=activeWaiters()+activeWaiters('wait-approval')===0&&!connectorAlive();
 }
@@ -284,8 +296,11 @@ const uiWords=new Set('Do you want to run execute this command Command Run Execu
 const projectedUi=value=>value.split('\n').map(line=>(line.match(/[A-Za-z][A-Za-z-]*|[^A-Za-z]+/g)??[]).map(token=>uiWords.has(token)?token:/^\s+$/.test(token)?' ':/^[>\[\]().:?]+$/.test(token)?token:'?').join('').replace(/ +/g,' ').trim()).filter(Boolean).slice(-18);
 const safeScreen=value=>({rows:value.split('\n').length,composerReady:composerState(value).ready,permissionPrompt:/Allow this|permission required|Approve|command denied|not allowed|Run this command\?/i.test(value),fixtureFailure:value.includes('OFFLINE_ACTUAL_PROOF_FAILED'),waiterMention:value.includes('psst-antigravity-native'),proofComplete:value.includes('OFFLINE_NATIVE_MESSAGE_CONTEXT_VERIFIED'),ui:projectedUi(value)});
 const permissionsUnchanged=JSON.stringify(JSON.parse(readFileSync(home+'/.gemini/antigravity-cli/settings.json','utf8')).permissions)===JSON.stringify(fixture.permissions);
+const permissionBoundaryVerified=expectPermissionBoundary&&nativePermissionBoundaryVerified({mode,confirmationBudget:confirmationPlan.length,permissionConfirmations,nativePermissionBlocked,...boundaryObservation,inboxProcesses:timeoutWaiters?.inbox,approvalProcesses:timeoutWaiters?.approval,waiterCompleted:waiterState.completed,approvalWaiterCompleted:approvalWaiterState.completed,rearmCompleted:rearmState.completed,messagesCompleted:messageState.completed,idleSeeded,approvalGranted,permissionsUnchanged,shutdownVerified,nativeSignal,providerFailure,parserFailed,timedOut,overflow,collectionUnchecked,termsAccepted,trustConfirmationSent,consentBlocked});
 const qualified=permissionsUnchanged&&actualVerified&&compactVerified&&setupVerified&&expectedWakeupVerified&&shutdownVerified&&!nativePermissionBlocked&&!parserFailed&&!timedOut&&!overflow&&expectedExit&&(!interactive||collectionUnchecked&&termsAccepted&&!consentBlocked);
-console.log(JSON.stringify({mode,setupFirstDeliveryOnly,firstDeliveryVerified,confirmationBudget:confirmationPlan.length,fixtureShutdownRequested,nativeSignal,waiterCompleted:waiterState.completed,approvalWaiterCompleted:approvalWaiterState.completed,rearmCompleted:rearmState.completed,permissionConfirmations,permissionsUnchanged,permissionDiagnostics,nativePermissionBlocked,blockedAction:nativePermissionBlocked?(mode==='setup'?'execute_disposable_approval_waiter_once':'execute_disposable_inbox_waiter_once'):null,timeoutWaiters,shutdownVerified,busyInjection,providerMaxActive,setupVerified,enrollmentPostCount:fixture.enrollmentPostCount,wakeupVerified,idleSeeded,idleStopped,rearmStopped,waiterProcesses,messagesVerified,messageBoundaries,presenceVerified,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence:consentEvidence.map(event=>({...event,...(event.screen?{screen:safeScreen(event.screen)}:{})})),terminalScreen:safeScreen(screen.text()),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:{bytes:Buffer.byteLength(err),parserFailure:err.includes('terminal_parser_failed'),permissionDenied:/permission|denied/i.test(err)},acceptance:qualified?(setupFirstDeliveryOnly?'actual_plugin_native_setup_first_delivery_verified':mode==='setup'?'actual_plugin_native_setup_wakeup_verified':mode==='busy'?'actual_plugin_native_busy_wakeup_verified':mode==='idle'?'actual_plugin_native_idle_wakeup_verified':mode==='messages'?'actual_plugin_native_message_context_verified':'actual_plugin_native_identity_verified'):'actual_plugin_native_qualification_unverified'}));
+console.log(JSON.stringify({mode,expectPermissionBoundary,permissionBoundaryVerified,permissionBoundaryAcceptance:permissionBoundaryVerified?'native_permission_boundary_verified':null,setupFirstDeliveryOnly,firstDeliveryVerified,confirmationBudget:confirmationPlan.length,fixtureShutdownRequested,nativeSignal,waiterCompleted:waiterState.completed,approvalWaiterCompleted:approvalWaiterState.completed,rearmCompleted:rearmState.completed,permissionConfirmations,permissionsUnchanged,permissionDiagnostics,nativePermissionBlocked,blockedAction:nativePermissionBlocked?(mode==='setup'?'execute_disposable_approval_waiter_once':'execute_disposable_inbox_waiter_once'):null,timeoutWaiters,shutdownVerified,busyInjection,providerMaxActive,setupVerified,enrollmentPostCount:fixture.enrollmentPostCount,wakeupVerified,idleSeeded,idleStopped,rearmStopped,waiterProcesses,messagesVerified,messageBoundaries,presenceVerified,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence:consentEvidence.map(event=>({...event,...(event.screen?{screen:safeScreen(event.screen)}:{})})),terminalScreen:safeScreen(screen.text()),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:{bytes:Buffer.byteLength(err),parserFailure:err.includes('terminal_parser_failed'),permissionDenied:/permission|denied/i.test(err)},acceptance:qualified?(setupFirstDeliveryOnly?'actual_plugin_native_setup_first_delivery_verified':mode==='setup'?'actual_plugin_native_setup_wakeup_verified':mode==='busy'?'actual_plugin_native_busy_wakeup_verified':mode==='idle'?'actual_plugin_native_idle_wakeup_verified':mode==='messages'?'actual_plugin_native_message_context_verified':'actual_plugin_native_identity_verified'):'actual_plugin_native_qualification_unverified'}));
+if(expectPermissionBoundary){assert(permissionBoundaryVerified,'native permission boundary not verified; no delivery acceptance claimed');}
+else {
 assert(permissionsUnchanged,'native fixture permission settings changed');
 assert(!nativePermissionBlocked,'native_permission_confirmation_required: no additional approval or policy override was applied');
 assert(!parserFailed&&!timedOut&&!overflow,'native fixture diagnostics failed');
@@ -296,3 +311,5 @@ assert(shutdownVerified,'native host exit must release MCP owner and background 
 assert(setupVerified,'actual native URL-only setup and exact admin approval unverified');
 assert(expectedWakeupVerified,setupFirstDeliveryOnly?'actual native setup first delivery unverified':'actual native idle arrival and re-arm unverified');
 assert(compactVerified,'actual native command continuity or rotation unverified');
+
+}

@@ -54,11 +54,12 @@ extra_args=()
 case "${2:-all}" in
  all) modes=(root compact new presence messages idle setup busy);;
  baseline) modes=(root compact new presence messages);;
+ permission-boundary) modes=(idle setup busy); extra_args=(--expect-permission-boundary);;
  automatic) modes=(idle setup busy);;
  authorized-once) modes=(idle); extra_args=(--confirm-waiter-once);;
  authorized-setup-remainder) modes=(setup); extra_args=(--confirm-remaining-setup);;
  authorized-matrix) modes=(idle setup busy); extra_args=(--confirm-authorized-matrix);;
- *) echo 'expected all, baseline, automatic or explicitly authorized-once/authorized-matrix/authorized-setup-remainder native qualification group' >&2; exit 2;;
+ *) echo 'expected all, baseline, permission-boundary, automatic or explicitly authorized-once/authorized-matrix/authorized-setup-remainder native qualification group' >&2; exit 2;;
 esac
 for mode in "${modes[@]}"; do
  timeout --kill-after=5s 50s docker run --rm --name "$name" --network none --user 1000:1000 --read-only --memory 2g --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m "${mounts[@]}" -e HOME=/tmp/proof-home "$image" node /fixture/actual-worker.mjs "$mode" "${extra_args[@]}" || status=1

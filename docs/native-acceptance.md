@@ -154,8 +154,15 @@ v2 while the real URL-only helper writes a documented v1-default bundle. The
 fixture now uses the broker's supported default. Real TLS regression covers both
 successful default activation and rejection under explicit v2 enforcement.
 
-Five of seven authorized executions were used. The two remaining setup
-executions are limited to approval and first inbox delivery, with a distinct
-first-delivery-only result and no re-arm request. Full setup/re-arm acceptance,
+The corrected setup first-delivery run passed at `6e64c71`, consuming the two
+remaining executions. All seven are now used. It proves real URL-only approval,
+automatic first delivery and full read/ACK with a distinct first-delivery-only
+result, not a setup re-arm. Full setup/re-arm acceptance,
 the actual supported owner launcher/upgrade and authenticated host checks remain
 open. No conversation-deletion hook, release or 1.0 readiness is implied.
+
+Default CI deliberately checks the exact unconfirmed native permission boundary
+with zero executions. Full automatic cases remain an explicit opt-in acceptance
+gate, documented with commands and historical authorized runs in the
+[CI scope](issue-8-acceptance.md#ci-scope-and-remaining-manual-acceptance-gate).
+Green default CI must not be described as complete authenticated native acceptance.

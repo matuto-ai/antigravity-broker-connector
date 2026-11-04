@@ -1,3 +1,4 @@
+import {nativePermissionBoundaryVerified} from './permission-state.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {pendingNativeCommandPermission as pending} from './permission-state.mjs';
@@ -42,4 +43,14 @@ test('approval waiter uses the same exact one-time UI contract and cannot substi
  assert.equal(exactWaiterPermission(approvalModal.replace('18-13757','19-13757'),{expectedCommand:approval}).recognized,false);
  assert.equal(exactWaiterPermission(approvalModal.replace('1ae19951','2ae19951'),{expectedCommand:approval}).recognized,false);
  assert.equal(exactWaiterPermission(approvalModal.replace('> 1. Yes','1. Yes').replace('2. Yes','> 2. Yes'),{expectedCommand:approval}).recognized,false);
+});
+
+test('permission boundary cannot count prompt observation as execution or arrival acceptance',()=>{
+ const valid={mode:'setup',confirmationBudget:0,permissionConfirmations:0,nativePermissionBlocked:true,provenanceVerified:true,commandCount:1,promptRecognized:true,inboxProcesses:0,approvalProcesses:0,waiterCompleted:0,approvalWaiterCompleted:0,rearmCompleted:0,messagesCompleted:0,idleSeeded:false,approvalGranted:false,permissionsUnchanged:true,shutdownVerified:true,nativeSignal:'SIGTERM',providerFailure:null,parserFailed:false,timedOut:false,overflow:false,collectionUnchecked:true,termsAccepted:true,trustConfirmationSent:true,consentBlocked:false};
+ assert.equal(nativePermissionBoundaryVerified(valid),true);
+ for(const mode of ['idle','busy'])assert.equal(nativePermissionBoundaryVerified({...valid,mode}),true);
+ for(const [key,value] of Object.entries(valid)){
+  const invalid=typeof value==='boolean'?!value:typeof value==='number'?value+1:value===null?'failure':'invalid';
+  assert.equal(nativePermissionBoundaryVerified({...valid,[key]:invalid}),false,key);
+ }
 });

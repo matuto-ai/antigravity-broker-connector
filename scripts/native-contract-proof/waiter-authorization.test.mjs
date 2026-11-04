@@ -33,3 +33,8 @@ test('remaining setup grant cannot repeat idle/busy or authorize a third setup c
  const s=input('setup');assert.equal(phase(p,1,s),'inbox');
  s.inbox.completed=1;s.messages.completed=6;s.rearm.sent=1;s.idleSeeded=true;assert.equal(phase(p,2,s),null);
 });
+
+test('permission-boundary observation grants no execution in any automatic mode',()=>{
+ for(const mode of ['idle','setup','busy'])assert.deepEqual(plan(mode,'--expect-permission-boundary'),[]);
+ assert.throws(()=>plan('root','--expect-permission-boundary'));
+});

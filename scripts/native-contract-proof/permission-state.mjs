@@ -36,3 +36,14 @@ export function exactWaiterPermission(screen,{expectedCommand}={}) {
  const footerDiagnostic=exactCommand&&knownChoices&&onceFocused&&keyHint?{key:keyHint[1],label:keyHint[2]}:null;
  return {footerDiagnostic,controlShape,recognized:bounded&&unique&&exactCommand&&onceFocused&&knownChoices&&knownFooter,header:header>=0,question:question>header,exactCommand,onceFocused,knownChoices,knownFooter};
 }
+
+// Separate regression scope: a pending prompt must stop the fixture without
+// authorizing execution. A pass here is never automatic-arrival acceptance.
+export function nativePermissionBoundaryVerified(s) {
+ return ['idle','setup','busy'].includes(s.mode)&&s.confirmationBudget===0&&s.permissionConfirmations===0&&
+  s.nativePermissionBlocked===true&&s.provenanceVerified===true&&s.commandCount===1&&s.promptRecognized===true&&
+  s.inboxProcesses===0&&s.approvalProcesses===0&&s.waiterCompleted===0&&s.approvalWaiterCompleted===0&&s.rearmCompleted===0&&
+  s.messagesCompleted===0&&s.idleSeeded===false&&s.approvalGranted===false&&s.permissionsUnchanged===true&&s.shutdownVerified===true&&
+  s.nativeSignal==='SIGTERM'&&s.providerFailure===null&&s.parserFailed===false&&s.timedOut===false&&s.overflow===false&&
+  s.collectionUnchecked===true&&s.termsAccepted===true&&s.trustConfirmationSent===true&&s.consentBlocked===false;
+}
