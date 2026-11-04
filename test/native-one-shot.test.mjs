@@ -16,3 +16,13 @@ test('one-shot run cannot repeat through normal CI, PR duplicates, later pushes 
  const fixture=readFileSync(new URL('../scripts/native-contract-proof/actual-plugin-fixture.mjs',import.meta.url),'utf8');
  assert.doesNotMatch(fixture,/command\('/);
 });
+
+test('automatic broker stimulus cannot fall through to interactive compact commands',()=>{
+ const worker=readFileSync(new URL('../scripts/native-contract-proof/actual-worker.mjs',import.meta.url),'utf8');
+ const compact=worker.indexOf(" const stops=observed.filter");
+ assert(compact>0);
+ const gate=worker.lastIndexOf("if(!['compact','new'].includes(mode))return;",compact);
+ assert(gate>worker.indexOf('const compactPoll='));
+ assert(gate<compact&&compact<worker.indexOf("child.stdin.write(mode==='new'",compact));
+ assert.match(worker,/processIdentity\(snap\.connectorProcess\.pid\)/);
+});

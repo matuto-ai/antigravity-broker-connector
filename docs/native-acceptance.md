@@ -150,3 +150,9 @@ Until their exact-head CI passes, these modes are unverified tests, not evidence
 that automatic native arrival works. Even passing synthetic-provider runs do not
 replace the original authenticated owner-host acceptance or establish a native
 conversation-deletion hook.
+
+The first explicitly authorized one-shot waiter observation is recorded in the
+[issue-8 checklist](issue-8-acceptance.md#one-authorized-execution-2026-11-04).
+It establishes a real running waiter and stopped native model turn, not message
+arrival. The observed renderer/lifecycle mismatch has a focused fixture fix;
+its corrected native run and the remaining setup/busy cases are still pending.

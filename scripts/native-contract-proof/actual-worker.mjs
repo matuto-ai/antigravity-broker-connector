@@ -4,6 +4,7 @@ import {actualCompactContinuity,actualRootRotation,matchingIdleStop} from './act
 import {presenceProviderStep} from './presence-provider-step.mjs';
 import {pendingNativeCommandPermission,exactWaiterPermission} from './permission-state.mjs';
 import {setupProviderStep} from './setup-provider-step.mjs';
+import {stoppedNativeWaiter} from './waiter-boundary.mjs';
 import {waiterProviderStep} from './waiter-provider-step.mjs';
 import {messageProviderStep,MESSAGE_TOOLS} from './message-provider-step.mjs';
 import {actualProviderStep} from './actual-provider-step.mjs';
@@ -37,7 +38,7 @@ const oneShotAuthorized=process.argv[3]==='--confirm-waiter-once';
 assert(!oneShotAuthorized||mode==='idle','one-shot authorization is scoped to one idle fixture only');
 let confirmedWaiterCommand=null;
 let permissionConfirmations=0,permissionVersion=-1,permissionSentAt=0,permissionDismissed=false,permissionDiagnostics=null;
-let nativePermissionBlocked=false;
+let nativePermissionBlocked=false,fixtureShutdownRequested=false;
 let busyInjection=false,providerActive=0,providerMaxActive=0;
 let setupState={sent:0,completed:0},approvalWaiterState={sent:0,completed:0},approvalGranted=false;
 let waiterState={sent:0,completed:0},rearmState={sent:0,completed:0},idleSeeded=false,idleStopped=false,rearmStopped=false,waiterProcesses=[];
@@ -143,7 +144,35 @@ function verifiedPermissionCommand(){
  assert.equal(activeWaiters()+activeWaiters('wait-approval'),0);
  return command;
 }
+function progressAutomaticFixture(){
+ if(!['idle','setup','busy'].includes(mode)||providerFailure||!termsAccepted||!trustConfirmationSent||fixtureShutdownRequested)return;
+ const observed=fixture.readEvents(),command=observed.findLast(h=>h.event==='PreToolUse'&&h.toolName==='run_command');
+ if(!command||!stoppedNativeWaiter(observed,command))return;
+ const liveHost=processIdentity(command.hostPid);assert.equal(liveHost.start,command.hostStart);assert.equal(liveHost.executable,'/native/antigravity');
+ if(mode==='setup'&&!approvalGranted&&approvalWaiterState.completed===1){
+  assert.equal(activeWaiters('wait-approval'),1,'approval waiter must be alive before admin approves');
+  trustPromptDismissed=true;approvalGranted=true;
+  fixture.approveSetup(setupState.requestId).catch(()=>{providerFailure='fixture_admin_approval_failed';child.kill('SIGTERM');});return;
+ }
+ if(identities.length!==1||command.conversationId!==identities[0].conversation_id)return;
+ const snap=snapshot(identities[0]);assert.deepEqual(snap,snapshots[0]);
+ assert.deepEqual(processIdentity(snap.host.pid),snap.host);
+ assert.deepEqual(processIdentity(snap.connectorProcess.pid),snap.connectorProcess);
+ assert.equal(command.hostPid,snap.host.pid);assert.equal(command.hostStart,snap.host.start);
+ if(!idleSeeded&&waiterState.completed===1){
+  assert.equal(activeWaiters(),1,'one native waiter must be alive before peer arrival');
+  trustPromptDismissed=true;idleStopped=true;waiterProcesses.push(1);
+  messageProof=fixture.seedMessages(identities[0].client_id);idleSeeded=true;
+ }else if(idleSeeded&&rearmState.completed===1&&!rearmStopped){
+  assert.equal(activeWaiters(),1,'exactly one native waiter re-armed after ACK');
+  trustPromptDismissed=true;rearmStopped=true;waiterProcesses.push(1);
+  // Terminate only our disposable native process after the full proof. Never
+  // type /exit through a background-task UI or an unrecognized permission UI.
+  fixtureShutdownRequested=true;child.kill('SIGTERM');
+ }
+}
 const compactPoll=interactive?setInterval(()=>{
+ if(!parserFailed&&!overflow&&!timedOut){try{progressAutomaticFixture();}catch{providerFailure='native_waiter_boundary_failed';child.kill('SIGTERM');}}
  const current=screen.text();if(parserFailed||overflow||timedOut||!screen.complete||Date.now()-Math.max(lastScreenChange,screen.lastParsedAt)<250)return;
  if(['idle','setup','busy'].includes(mode)&&pendingNativeCommandPermission(current,{trustSent:trustConfirmationSent,commandObserved:fixture.readEvents().some(h=>h.event==='PreToolUse'&&h.toolName==='run_command')})){
   if(oneShotAuthorized&&permissionConfirmations===0){
@@ -190,27 +219,16 @@ const compactPoll=interactive?setInterval(()=>{
   return;
  }
  if(!termsAccepted||screen.version<=acceptScreenVersion||consent.terms)return;
+ if(!['compact','new'].includes(mode))return;
  if(!trustPromptDismissed||!composerState(current).ready)return;
  const observed=fixture.readEvents();
- if(['idle','setup','busy'].includes(mode)){
-  const stopped=observed.filter(h=>h.event==='Stop'&&h.fullyIdle===false&&(mode==='setup'&&!identities.length||h.conversationId===identities[0]?.conversation_id)&&['model_stop','NO_TOOL_CALL'].includes(h.terminationReason));
-  if(mode==='setup'&&!approvalGranted&&approvalWaiterState.completed===1&&stopped.length>=1){
-   assert.equal(activeWaiters('wait-approval'),1,'approval waiter must be alive before admin approves');approvalGranted=true;fixture.approveSetup(setupState.requestId).catch(error=>{providerFailure='fixture_admin_approval_failed';child.kill('SIGTERM');});return;
-  }
-  if(!idleSeeded&&waiterState.completed===1&&stopped.length>=(mode==='setup'?2:1)){
-   idleStopped=true;waiterProcesses.push(activeWaiters());assert.equal(waiterProcesses.at(-1),1,'one native waiter must be alive before peer arrival');
-   messageProof=fixture.seedMessages(identities[0].client_id);idleSeeded=true;
-  } else if(idleSeeded&&rearmState.completed===1&&stopped.length>=(mode==='setup'?3:mode==='busy'?1:2)&&!rearmStopped){
-   rearmStopped=true;waiterProcesses.push(activeWaiters());assert.equal(waiterProcesses.at(-1),1,'exactly one native waiter re-armed after ACK');child.stdin.write('/exit\r');
-  }
-  return;
- }
  const stops=observed.filter(h=>h.event==='Stop'&&h.fullyIdle===true&&['model_stop','NO_TOOL_CALL'].includes(h.terminationReason));
  if(!compactIssued&&identities.length===1&&snapshots.length===1&&snapshots[0].admittedRoot===identities[0].conversation_id&&observed.some(h=>h.event==='PreToolUse'&&h.tool==='broker_identity'&&h.conversationId===identities[0].conversation_id&&h.environmentConversationId===h.conversationId&&h.hostPid===snapshots[0].host.pid&&h.hostStart===snapshots[0].host.start)&&stops.some(h=>h.conversationId===identities[0].conversation_id&&h.environmentConversationId===h.conversationId&&h.hostPid===snapshots[0].host.pid&&h.hostStart===snapshots[0].host.start)){compactIssued=true;commandVersion=screen.version;child.stdin.write(mode==='new'?'/new\r':'/compact\r');}
  else if(compactIssued&&!probeIssued&&(mode==='compact'?current.includes('Conversation compacted'):screen.version>commandVersion)){probeIssued=true;probeHookStart=observed.length;turn={sent:0,completed:0};child.stdin.write('Read broker_setup_status then broker_identity after the native command, then stop. No other tools.\r');}
  else if(probeIssued&&identities.length===2&&snapshots.length===2&&probeHookStart>=0&&observed.slice(probeHookStart).some(h=>matchingIdleStop(h,snapshots[1]))&&!stoppedAfterCompact){stoppedAfterCompact=true;child.stdin.write('/exit\r');}
 },100):null;
-let timeoutWaiters=null;const timer=setTimeout(()=>{timeoutWaiters={inbox:activeWaiters(),approval:activeWaiters('wait-approval')};timedOut=true;child.kill('SIGKILL');},30000);const code=await new Promise(resolve=>child.once('close',resolve));clearTimeout(timer);clearInterval(compactPoll);for(const t of compactTimers)clearTimeout(t);provider.close();
+let timeoutWaiters=null;const timer=setTimeout(()=>{timeoutWaiters={inbox:activeWaiters(),approval:activeWaiters('wait-approval')};timedOut=true;child.kill('SIGKILL');},30000);const {code,signal:nativeSignal}=await new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));
+const expectedExit=[0,130].includes(code)||fixtureShutdownRequested&&nativeSignal==='SIGTERM';clearTimeout(timer);clearInterval(compactPoll);for(const t of compactTimers)clearTimeout(t);provider.close();
 let shutdownVerified=true;
 if(['idle','setup','busy'].includes(mode)){
  const until=Date.now()+3000;
@@ -232,12 +250,12 @@ const uiWords=new Set('Do you want to run execute this command Command Run Execu
 const projectedUi=value=>value.split('\n').map(line=>(line.match(/[A-Za-z][A-Za-z-]*|[^A-Za-z]+/g)??[]).map(token=>uiWords.has(token)?token:/^\s+$/.test(token)?' ':/^[>\[\]().:?]+$/.test(token)?token:'?').join('').replace(/ +/g,' ').trim()).filter(Boolean).slice(-18);
 const safeScreen=value=>({rows:value.split('\n').length,composerReady:composerState(value).ready,permissionPrompt:/Allow this|permission required|Approve|command denied|not allowed|Run this command\?/i.test(value),fixtureFailure:value.includes('OFFLINE_ACTUAL_PROOF_FAILED'),waiterMention:value.includes('psst-antigravity-native'),proofComplete:value.includes('OFFLINE_NATIVE_MESSAGE_CONTEXT_VERIFIED'),ui:projectedUi(value)});
 const permissionsUnchanged=JSON.stringify(JSON.parse(readFileSync(home+'/.gemini/antigravity-cli/settings.json','utf8')).permissions)===JSON.stringify(fixture.permissions);
-const qualified=permissionsUnchanged&&actualVerified&&compactVerified&&setupVerified&&wakeupVerified&&shutdownVerified&&!nativePermissionBlocked&&!parserFailed&&!timedOut&&!overflow&&[0,130].includes(code)&&(!interactive||collectionUnchecked&&termsAccepted&&!consentBlocked);
-console.log(JSON.stringify({mode,permissionConfirmations,permissionsUnchanged,permissionDiagnostics,nativePermissionBlocked,blockedAction:nativePermissionBlocked?(mode==='setup'?'execute_disposable_approval_waiter_once':'execute_disposable_inbox_waiter_once'):null,timeoutWaiters,shutdownVerified,busyInjection,providerMaxActive,setupVerified,enrollmentPostCount:fixture.enrollmentPostCount,wakeupVerified,idleSeeded,idleStopped,rearmStopped,waiterProcesses,messagesVerified,messageBoundaries,presenceVerified,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence:consentEvidence.map(event=>({...event,...(event.screen?{screen:safeScreen(event.screen)}:{})})),terminalScreen:safeScreen(screen.text()),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:{bytes:Buffer.byteLength(err),parserFailure:err.includes('terminal_parser_failed'),permissionDenied:/permission|denied/i.test(err)},acceptance:qualified?(mode==='setup'?'actual_plugin_native_setup_wakeup_verified':mode==='busy'?'actual_plugin_native_busy_wakeup_verified':mode==='idle'?'actual_plugin_native_idle_wakeup_verified':mode==='messages'?'actual_plugin_native_message_context_verified':'actual_plugin_native_identity_verified'):'actual_plugin_native_qualification_unverified'}));
+const qualified=permissionsUnchanged&&actualVerified&&compactVerified&&setupVerified&&wakeupVerified&&shutdownVerified&&!nativePermissionBlocked&&!parserFailed&&!timedOut&&!overflow&&expectedExit&&(!interactive||collectionUnchecked&&termsAccepted&&!consentBlocked);
+console.log(JSON.stringify({mode,fixtureShutdownRequested,nativeSignal,waiterCompleted:waiterState.completed,approvalWaiterCompleted:approvalWaiterState.completed,rearmCompleted:rearmState.completed,permissionConfirmations,permissionsUnchanged,permissionDiagnostics,nativePermissionBlocked,blockedAction:nativePermissionBlocked?(mode==='setup'?'execute_disposable_approval_waiter_once':'execute_disposable_inbox_waiter_once'):null,timeoutWaiters,shutdownVerified,busyInjection,providerMaxActive,setupVerified,enrollmentPostCount:fixture.enrollmentPostCount,wakeupVerified,idleSeeded,idleStopped,rearmStopped,waiterProcesses,messagesVerified,messageBoundaries,presenceVerified,actualVerified,compactVerified,providerFailure,providerDiagnostics,themeSelected,collectionUnchecked,termsAccepted,trustConfirmationSent,trustPromptDismissed,consentBlocked,consentEvidence:consentEvidence.map(event=>({...event,...(event.screen?{screen:safeScreen(event.screen)}:{})})),terminalScreen:safeScreen(screen.text()),timedOut,overflow,compactIssued,probeIssued,isolation:'loopback-only',nativeExit:code,requests,hook,identities,snapshots,error:{bytes:Buffer.byteLength(err),parserFailure:err.includes('terminal_parser_failed'),permissionDenied:/permission|denied/i.test(err)},acceptance:qualified?(mode==='setup'?'actual_plugin_native_setup_wakeup_verified':mode==='busy'?'actual_plugin_native_busy_wakeup_verified':mode==='idle'?'actual_plugin_native_idle_wakeup_verified':mode==='messages'?'actual_plugin_native_message_context_verified':'actual_plugin_native_identity_verified'):'actual_plugin_native_qualification_unverified'}));
 assert(permissionsUnchanged,'native fixture permission settings changed');
 assert(!nativePermissionBlocked,'native_permission_confirmation_required: no additional approval or policy override was applied');
 assert(!parserFailed&&!timedOut&&!overflow,'native fixture diagnostics failed');
-assert([0,130].includes(code),'native fixture exit');
+assert(expectedExit,'native fixture exit');
 assert(actualVerified,'actual plugin native identity unverified; no permission bypass');
 if(interactive)assert(collectionUnchecked&&termsAccepted&&!consentBlocked,'terms/trust unverified');
 assert(shutdownVerified,'native host exit must release MCP owner and background waiters');
