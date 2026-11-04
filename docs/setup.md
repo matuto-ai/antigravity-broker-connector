@@ -7,11 +7,11 @@ Node 24.19+ within major 24 must already be available inside the same sandbox. D
 the old cooperative MCP configuration alongside the native plugin: each would
 otherwise own a separate address. Legacy cooperative integrations are diagnostic/test-only, not a production fallback; switching integrations does not erase their unread journals.
 
-After publication of **0.6.0 is verified** (this is currently an unreleased candidate), one-time package bootstrap:
+After publication of **0.7.0 is verified** (this is currently an unreleased candidate), one-time package bootstrap:
 
 ```sh
 npm install --prefix "$HOME/.local/share/psst-antigravity" --ignore-scripts \
-  @matuto-ai/antigravity-psst-connector@0.6.0
+  @matuto-ai/antigravity-psst-connector@0.7.0
 "$HOME/.local/share/psst-antigravity/node_modules/.bin/psst-antigravity" doctor
 ```
 
