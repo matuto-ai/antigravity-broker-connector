@@ -26,3 +26,10 @@ test('only exact rendered disposable inbox waiter with one-shot control focused 
  assert.equal(exactWaiterPermission(modal(expected)).recognized,false);
  assert.equal(exactWaiterPermission(modal(expected+'; true'),{expectedCommand:expected+'; true'}).recognized,false);
 });
+
+test('footer diagnostics expose only bounded key hints, never an arbitrary footer',()=>{
+ assert.deepEqual(exactWaiterPermission(modal(expected),{expectedCommand:expected}).footerDiagnostic,{key:'1-4',label:'Choose'});
+ for(const replacement of ['12345678-1234-4123-8123-123456789abc','aQp8q0Idmp5vbwW3utK8lH45nm9sPnQ','[x] Remember']){
+  assert.equal(exactWaiterPermission(modal(expected).replace('1-4 Choose',replacement),{expectedCommand:expected}).footerDiagnostic,null);
+ }
+});

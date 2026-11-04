@@ -34,5 +34,7 @@ export function exactWaiterPermission(screen,{expectedCommand}={}) {
   (footer.match(/[A-Za-z]+/g)??[]).every(word=>footerWords.has(word));
  const safeWords=new Set("Yes No run command and always allow in this conversation for commands that start with Persist to settings json cancel Navigate Choose choose expand Select select Confirm confirm Accept accept enter ctrl e g esc Esc edit Edit review rerun re-run fixture usr local bin node plugin psst-antigravity-native mjs wait 1 2 3 4".split(' '));
  const controlShape=options.join('\n').replace(/[A-Za-z0-9_-]+/g,word=>safeWords.has(word)?word:'?').slice(0,2048);
- return {controlShape,recognized:bounded&&unique&&exactCommand&&onceFocused&&knownChoices&&knownFooter,header:header>=0,question:question>header,exactCommand,onceFocused,knownChoices,knownFooter};
+ const keyHint=/^↑\/↓ Navigate · ([A-Za-z0-9+-]{1,8}) ([A-Za-z]{1,10}) · ctrl\+g edit\/expand command esc to cancel fixture$/.exec(footer);
+ const footerDiagnostic=exactCommand&&knownChoices&&onceFocused&&keyHint?{key:keyHint[1],label:keyHint[2]}:null;
+ return {footerDiagnostic,controlShape,recognized:bounded&&unique&&exactCommand&&onceFocused&&knownChoices&&knownFooter,header:header>=0,question:question>header,exactCommand,onceFocused,knownChoices,knownFooter};
 }
