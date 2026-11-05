@@ -36,9 +36,9 @@ function save(path,data) { const tmp=`${path}.${randomUUID()}.tmp`;writeFileSync
 const shape=properties=>({type:'object',properties,required:[],additionalProperties:false});
 export const NATIVE_DEFINITIONS=[
  {name:'broker_setup',description:'Explicit human setup or /psst-reauthorize invocation: provide only broker_url. A valid reauthorization command supplies replacement intent without another agent confirmation; native permissions and broker-admin approval still apply. Reauthorization requires /psst-reauthorize <https://broker.example>; never fill a missing argument from status. Configured-broker mismatches are rejected before setup changes. Reuses a pending candidate; replacement is selected only after approval and attachment. Never revokes old access. No replace argument, secrets or automatic enrollment.',inputSchema:{...shape({broker_url:{type:'string',maxLength:2048}}),required:['broker_url']}},
- {name:'broker_setup_status',description:'Show public broker_url, setup/approval state, request_connection_state and running connector package version; never exposes credentials or creates a request. Version is not native-host or delivery certification.',inputSchema:shape({})},
- {name:'broker_cancel_setup',description:'Cancel local pending setup/resume, keeping existing approved authorization.',inputSchema:shape({})},
- {name:'broker_connect',description:'Explicitly connect this native conversation using a PRIVATE pairing_file path or connection_file path, never secret text. Experimental native wakeup is not certified.',inputSchema:shape({pairing_file:{type:'string',maxLength:4096},connection_file:{type:'string',maxLength:4096}})},
+ {name:'broker_setup_status',description:'Show public broker_url, setup/approval state, connection state, exact client_id, explicit disconnected flag and running connector package version. No credentials, enrollment or replacement. Saved authorization may reconnect through existing native recovery. Version is not native-host or delivery certification.',inputSchema:shape({})},
+ {name:'broker_cancel_setup',description:'Pause this conversation’s pending setup and late attachment, retaining the durable request, approved authorization, unread messages and any working transport. A retained connection returns its inbox waiter; no revocation or disconnect.',inputSchema:shape({})},
+ {name:'broker_connect',description:'Explicitly connect this native conversation using saved authorization with no arguments; already connected is a no-op. Bare connect never enrolls or replaces authorization. Optional legacy PRIVATE pairing_file or connection_file path (exactly one), never secret text. Experimental native wakeup is not certified.',inputSchema:shape({pairing_file:{type:'string',maxLength:4096},connection_file:{type:'string',maxLength:4096}})},
  {name:'broker_disconnect',description:'Disconnect this conversation and cancel its waiter. Does not revoke the installation credential.',inputSchema:shape({})},
  {name:'broker_presence_events',description:'Read pending transport notices, separate from agent messages. No reply timeout or proof of non-delivery. Explicit event acknowledgment is required; drain batches while has_more.',inputSchema:shape({})},
  {name:'broker_acknowledge_presence_event',description:'Explicitly acknowledge a previously read transport event_id. Does not acknowledge any message, resend, cancel or close sessions.',inputSchema:{...shape({event_id:{type:'string',format:'uuid',maxLength:36}}),required:['event_id']}},
@@ -188,20 +188,24 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
       const connected=Boolean(session)&&(!transport||transport.heartbeat==='healthy'&&['healthy','paused','disabled'].includes(transport.reception)&&transport.recovery==='idle');
       return {...manager.status,broker_url:brokerUrl??null,
         request_connection_state:manager.status.state==='pending'?'pending':retrying?'reconnecting':manager.status.state==='approved'&&connected?'connected':manager.status.approval_state==='approved'?'approved_not_connected':'not_connected',
-        connector_runtime:CONNECTOR_RUNTIME,connected,transport_attached:Boolean(session),...(transport?{transport}:{}),mode:'automatic_required',
+        connector_runtime:CONNECTOR_RUNTIME,connected,disconnected:disabled,client_id:session?.identity.client_id??null,automatic_delivery_certified:false,
+        transport_attached:Boolean(session),...(transport?{transport}:{}),mode:'automatic_required',
         readiness:retrying||reconnectAt?'reconnecting':connected?'native_wakeup_acceptance_unverified':transport?.recovery==='blocked'?'blocked':'not_connected',
         ...(reconnectAt?{retry_after_ms:Math.max(0,reconnectAt-now())}:{}),
         ...(waiting?{waiter_command:approvalWaiterCommand(directory)}:session?{waiter_command:waiterCommand(directory)}:{})};
     }
-    if(def.name==='broker_cancel_setup'){approvalResumed=true;installation.suppressSetup(verified.conversationId,true);return manager.cancel();}
+    if(def.name==='broker_cancel_setup'){approvalResumed=true;installation.suppressSetup(verified.conversationId,true);return {...manager.cancel(),connected:Boolean(session),...(session?{waiter_command:waiterCommand(directory)}:{})};}
     if(def.name==='broker_connect') {
       if(connecting)throw Error('native_connect_in_progress');
-      const a=verified.args;
-      if(Boolean(a.pairing_file)===Boolean(a.connection_file))throw Error('one_private_file_path_required');
+      const requested=verified.args,saved=requested.pairing_file===undefined&&requested.connection_file===undefined;
+      if(!saved&&Boolean(requested.pairing_file)===Boolean(requested.connection_file))throw Error('one_private_file_path_required');
       if(session){
-        if(session.source.pairing_file!==a.pairing_file||session.source.connection_file!==a.connection_file)throw Error('disconnect_before_repair');
+        if(!saved&&(session.source.pairing_file!==requested.pairing_file||session.source.connection_file!==requested.connection_file))throw Error('disconnect_before_repair');
         return {connected:true,...session.identity,waiter_command:waiterCommand(directory),automatic_delivery_certified:false};
       }
+      const selected=saved?installation.selected():null;
+      if(saved&&!selected){const error=new LocalError('setup_needed');error.message='No saved Psst authorization. Invoke /psst-setup <https://broker.example> for initial setup; connect never enrolls.';throw error;}
+      const a=saved?{connection_file:selected.connectionFile}:requested;
       const wasRecoveryBlocked=recoveryBlocked;recoveryBlocked=false;connecting=true;
       const startedEpoch=epoch,startedGeneration=rootGeneration;attempt=new AbortController();
       try {
@@ -214,6 +218,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
         if(!currentRoot(verified.conversationId,startedGeneration)||epoch!==startedEpoch){await candidate.close({closeSession:false});throw Error('native_host_unavailable');}
         installation.setSessionDisabled(verified.conversationId,false);disabled=false;reconnectAt=0;lastTransportStatus=undefined;session=candidate={...candidate,conversationId:verified.conversationId,source:a};epoch++;
         try{state();}catch{await disconnect();throw Error('native_state_unavailable');}
+        if(selected&&manager.status.state!=='pending')manager.adopt(selected);
         return {connected:true,...session.identity,waiter_command:waiterCommand(directory),automatic_delivery_certified:false};
       } catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;} finally{connecting=false;attempt=undefined;}
     }
