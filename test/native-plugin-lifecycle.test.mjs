@@ -242,7 +242,7 @@ test('invalid or mismatched setup leaves an explicitly disconnected conversation
  const f=await fixture(t),id=randomUUID();await f.call(id);await f.call(id,'broker_disconnect');
  const selected=f.installation.selected(),pending=f.installation.pending();
  for(const broker_url of [undefined,'not a URL','https://other.example']){
-  await assert.rejects(f.call(id,'broker_setup',{broker_url}),broker_url==='https://other.example'?/broker_endpoint_mismatch/:/https_broker_url_required/);
+  await assert.rejects(f.call(id,'broker_setup',broker_url===undefined?{}:{broker_url}),broker_url==='https://other.example'?/broker_endpoint_mismatch/:/https_broker_url_required/);
   assert.deepEqual(f.installation.selected(),selected);assert.deepEqual(f.installation.pending(),pending);
   assert.equal(f.installation.sessionDisabled(id),true);assert.equal(f.installation.setupSuppressed(id),true);
  }
