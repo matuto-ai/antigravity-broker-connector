@@ -113,6 +113,16 @@ test('doctor rejects every missing native runtime dependency before suggesting i
   assert.throws(() => inspectNativeInstallation(f.pkg, { home: f.root }), /native_plugin_package_invalid/);
 });
 
+test('doctor rejects a package missing either lifecycle command skill', t => {
+  const f = fixture(t);
+  for (const name of ['psst-connect', 'psst-disconnect']) {
+    const path = join(f.pkg, 'skills', name, 'SKILL.md'), content = readFileSync(path);
+    rmSync(path);
+    assert.throws(() => inspectNativeInstallation(f.pkg, { home: f.root }), /native_plugin_package_invalid/);
+    writeFileSync(path, content);
+  }
+});
+
 test('doctor rejects disabled, missing or modified hooks and additional MCP commands', t => {
   const f = fixture(t), hookPath = join(f.pkg, 'hooks.json'), mcpPath = join(f.pkg, 'mcp_config.json');
   const hooks = JSON.parse(readFileSync(hookPath)), mcp = JSON.parse(readFileSync(mcpPath));

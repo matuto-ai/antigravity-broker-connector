@@ -144,6 +144,101 @@ test('explicit disconnect cancels scheduled reconnection and retains installatio
   assert.equal(f.calls.length, 1); assert.equal(f.installation.selected().requestId, f.requestId);
 });
 
+test('bare connect reuses saved authorization, is idempotent and resumes an explicit disconnect', async t => {
+  const f = await fixture(t), id = randomUUID();
+  const selected = f.installation.selected(), pending = f.installation.pending();
+  const first = await f.call(id, 'broker_connect');
+  assert.equal(first.connected, true);
+  assert.equal(first.waiter_command, waiterCommand(f.server.directory));
+  assert.equal((await f.call(id, 'broker_connect')).client_id, first.client_id);
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(await f.call(id, 'broker_disconnect'), { connected: false });
+  assert.equal(f.sessions[0].closes.length, 1);
+  const reopened = openInstallation(f.installation.directory, path => f.configs.get(path));
+  assert.equal(reopened.sessionDisabled(id), true);
+  f.advance(600000);
+  assert.equal((await f.call(id)).connected, false);
+  assert.equal(f.calls.length, 1);
+  const resumed = await f.call(id, 'broker_connect');
+  assert.equal(resumed.client_id, first.client_id);
+  assert.equal(resumed.waiter_command, waiterCommand(f.server.directory));
+  assert.equal(reopened.sessionDisabled(id), false);
+  const status = await f.call(id);
+  assert.equal(status.state, 'approved');
+  assert.equal(status.request_connection_state, 'connected');
+  assert.equal(f.calls.length, 2);
+  assert.deepEqual(f.installation.selected(), selected);
+  assert.deepEqual(f.installation.pending(), pending);
+});
+
+test('bare connect without saved authorization requests setup without enrolling', async t => {
+  const f = await fixture(t, { selected: false });
+  await assert.rejects(f.call(randomUUID(), 'broker_connect'), error => {
+    assert.equal(error.code, 'setup_needed');
+    assert.match(error.message, /\/psst-setup/);
+    return true;
+  });
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.installation.selected(), null);
+  assert.equal(f.installation.pending(), null);
+});
+
+test('failed saved connect preserves explicit disconnect and installation selection', async t => {
+  const f = await fixture(t, { failure: count => { if (count > 1) throw Error('attachment_failed'); } });
+  const id = randomUUID();
+  await f.call(id, 'broker_connect');
+  await f.call(id, 'broker_disconnect');
+  const selected = f.installation.selected(), pending = f.installation.pending();
+  await assert.rejects(f.call(id, 'broker_connect'), /attachment_failed/);
+  assert.equal(f.installation.sessionDisabled(id), true);
+  assert.deepEqual(f.installation.selected(), selected);
+  assert.deepEqual(f.installation.pending(), pending);
+  f.advance(600000);
+  assert.equal((await f.call(id)).connected, false);
+  assert.equal(f.calls.length, 2);
+});
+
+test('invalid saved selection leaves a disconnected conversation disabled without enrollment', async t => {
+  const f = await fixture(t), id = randomUUID();
+  await f.call(id, 'broker_connect');
+  await f.call(id, 'broker_disconnect');
+  const config = f.configs.get(f.connectionFile);
+  f.configs.set(f.connectionFile, { ...config, enrollment: { ...config.enrollment, credentialId: 'different' } });
+  await assert.rejects(f.call(id, 'broker_connect'), /installation_identity_changed/);
+  assert.equal(f.installation.sessionDisabled(id), true);
+  assert.equal(f.calls.length, 1);
+});
+
+test('disconnect during bare connect fences a late session without changing saved authorization', async t => {
+  const entered = barrier(), finish = barrier();
+  const f = await fixture(t, { failure: async () => { entered.resolve(); await finish.promise; } });
+  const id = randomUUID(), selected = f.installation.selected();
+  const connecting = assert.rejects(f.call(id, 'broker_connect'), /native_host_unavailable/);
+  await entered.promise;
+  await f.call(id, 'broker_disconnect');
+  finish.resolve();
+  await connecting;
+  assert.equal(f.sessions[0].closes.length, 1);
+  assert.equal(f.installation.sessionDisabled(id), true);
+  assert.deepEqual(f.installation.selected(), selected);
+  f.advance(600000);
+  assert.equal((await f.call(id)).connected, false);
+  assert.equal(f.calls.length, 1);
+});
+
+test('explicit connect retains private-file validation and cannot replace a working connection', async t => {
+  const f = await fixture(t), id = randomUUID();
+  for (const args of [{ pairing_file: '/private/pair.json', connection_file: f.connectionFile }, { connection_file: '' }]) {
+    await assert.rejects(f.call(id, 'broker_connect', args), /one_private_file_path_required/);
+  }
+  assert.equal(f.calls.length, 0);
+  const connected = await f.call(id, 'broker_connect', { connection_file: f.connectionFile });
+  assert.equal((await f.call(id, 'broker_connect')).client_id, connected.client_id);
+  await assert.rejects(f.call(id, 'broker_connect', { connection_file: '/other/connection.json' }), /disconnect_before_repair/);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.sessions[0].closes.length, 0);
+});
+
 test('missing installation stays setup-needed and never calls the native session factory', async t => {
   const f = await fixture(t, { selected: false });
   const id = randomUUID(); assert.equal((await f.call(id)).state, 'setup_needed');

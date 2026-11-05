@@ -47,7 +47,7 @@ function inspectPackage(path, { platform = process.platform, version = process.v
   catch { throw Error('plugin_source_directory_not_found'); }
   try { regularFile(root, 'plugin.json'); } catch { throw Error('plugin_root_manifest_missing'); }
   try {
-    for (const file of ['package.json','mcp_config.json','hooks.json','skills/psst-setup/SKILL.md','skills/psst-reauthorize/SKILL.md','skills/psst/SKILL.md',...NATIVE_RUNTIME_FILES]) regularFile(root, file);
+    for (const file of ['package.json','mcp_config.json','hooks.json','skills/psst-setup/SKILL.md','skills/psst-reauthorize/SKILL.md','skills/psst-connect/SKILL.md','skills/psst-disconnect/SKILL.md','skills/psst/SKILL.md',...NATIVE_RUNTIME_FILES]) regularFile(root, file);
     const manifest = JSON.parse(readFileSync(join(root, 'plugin.json'), 'utf8'));
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     const mcp = JSON.parse(readFileSync(join(root, 'mcp_config.json'), 'utf8'));

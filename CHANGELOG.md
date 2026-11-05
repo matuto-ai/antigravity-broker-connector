@@ -1,5 +1,7 @@
 # 0.8.0 — Unreleased
 
+- Package `/psst-connect` and `/psst-disconnect` skills in both native installation paths. Bare connect reuses saved authorization without enrollment, is a no-op when connected, and explicitly resumes a disconnected conversation; disconnect preserves credentials and unread journals across reload. Legacy private-file connect remains supported.
+
 - Remove the release CI post-publication registry gate. Keep exact-artifact preparation, syntax/unit checks, version guards and npm publish; the owner confirms publication manually.
 - Prepare matching package and native plugin versions for 0.8.0. No release or publication is performed by this change.
 

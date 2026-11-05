@@ -27,7 +27,7 @@ for (const [name, guidance, ...requirements] of fixtures) {
   });
 }
 test('packaged skills and native waiter share collaboration guidance without grant gates', () => {
-  for (const name of ['psst', 'psst-setup', 'psst-reauthorize']) {
+  for (const name of ['psst', 'psst-setup', 'psst-reauthorize', 'psst-connect', 'psst-disconnect']) {
     const skill = readFileSync(new URL('../skills/' + name + '/SKILL.md', import.meta.url), 'utf8');
     if (name !== 'psst-reauthorize') {
       assert.match(skill, /Follow the native server's shared ordinary-command guidance/, name);
@@ -45,10 +45,25 @@ test('generated experimental plugin delivers the shared peer and transport-notic
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const target = join(root, 'plugin');
   execFileSync(process.execPath, [new URL('../scripts/prepare-native-plugin.mjs', import.meta.url).pathname, target, '--experimental-native']);
-  const skill = readFileSync(join(target, 'skills/psst-connect/SKILL.md'), 'utf8');
+  for (const name of ['psst', 'psst-setup', 'psst-reauthorize', 'psst-connect', 'psst-disconnect']) {
+    assert.equal(readFileSync(join(target, 'skills', name, 'SKILL.md'), 'utf8'),
+      readFileSync(new URL('../skills/' + name + '/SKILL.md', import.meta.url), 'utf8'));
+  }
+  const skill = readFileSync(join(target, 'skills/psst/SKILL.md'), 'utf8');
   assert.ok(skill.includes(PEER_GUIDANCE));
-  assert.match(skill, /transport notice is not an agent message/);
+  assert.match(skill, /Do not call broker_receive merely for a transport notice or treat it as peer content/);
   assert.match(skill, /broker_acknowledge_presence_event/);
+});
+test('connect and disconnect skills use native lifecycle tools without enrollment or credential handoff', () => {
+  const connect = readFileSync(new URL('../skills/psst-connect/SKILL.md', import.meta.url), 'utf8');
+  const disconnect = readFileSync(new URL('../skills/psst-disconnect/SKILL.md', import.meta.url), 'utf8');
+  assert.match(connect, /call broker_connect with no arguments/);
+  assert.match(connect, /already connected conversation is a no-op/);
+  assert.match(connect, /No URL, token or file handoff is required/);
+  assert.match(connect, /waiter_command once with native run_command, WaitMsBeforeAsync=500/);
+  assert.match(disconnect, /call broker_disconnect with no arguments/);
+  assert.match(disconnect, /Saved installation authorization and unread journals remain intact/);
+  assert.match(disconnect, /Do not arm another waiter or reconnect automatically/);
 });
 test('only initial setup can fill a missing endpoint from public status', () => {
   const setup = readFileSync(new URL('../skills/psst-setup/SKILL.md', import.meta.url), 'utf8');
