@@ -1,3 +1,7 @@
+# 0.9.0 — Unreleased
+
+- Prepare matching package and native plugin versions for 0.9.0, including the merged connector changes. Update installation and release instructions; publication remains a separate owner action.
+
 # 0.8.0 — Unreleased
 
 - Add `/psst-status`, `/psst-cancel-setup` and `/psst-doctor` skills. Status reports exact client ID and explicit disconnect; cancel-setup retains working transport and returns its inbox waiter; doctor reuses the read-only CLI package/runtime/registration inspection. Both plugin paths ship all commands. Live native acceptance remains separate.
