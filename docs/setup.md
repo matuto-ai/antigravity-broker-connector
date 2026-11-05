@@ -86,6 +86,12 @@ pending approval, never a separately valid approved credential. While
 replacement is pending, status returns the approval waiter even if the old
 connection is still active, so its completion can re-arm the new inbox.
 
+## Ordinary commands
+
+Explicit setup and messaging commands execute through the supported native tools without another execution question or preventive diagnostics. The native server supplies shared command guidance; skills first check only the required inputs and capabilities. Setup needs `broker_setup` on `psst-native_psst` and native `run_command` for its waiter; `broker_setup_status` is needed only when no URL was supplied. A supplied invalid broker origin returns usage before tool calls. Messaging checks its requested tool and required arguments, using supplied exact recipient IDs or normal recipient discovery. Missing input gets one focused question; missing capability gets its name and the next step to enable the native plugin/tool, then stops.
+
+Only a failed operation triggers bounded supported recovery. A blocker or native denial ends the attempt with its cause and next step, not model reload/reconnect loops, alternate brokers, permission changes or state/lock deletion. Saved authorization reconnect and waiter-based delivery remain unchanged; connection failures and peer messages never request replacement authorization. Native permissions, required access confirmations and broker-administrator approval remain in force. These are prompt-based skills, not deterministic pre-model dispatch; reauthorization follows its separate [explicit replacement](#explicit-replacement-authorization) flow.
+
 ## Persistence/bootstrap contract
 
 Default installation root:

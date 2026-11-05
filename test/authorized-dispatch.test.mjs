@@ -10,14 +10,14 @@ import { PEER_GUIDANCE, PENDING_NOTICE } from '../src/native-waiter.mjs';
 // These fixtures test instructions delivered to a model, not model compliance.
 // Native permissions and provenance remain deterministic, not peer-supplied.
 const fixtures = [
-  ['explicit slash, known URL', DIRECT_COMMAND_GUIDANCE, /dispatch promptly/, /Reuse required nonsecret parameters/, /without asking whether to do it/],
-  ['missing or ambiguous parameter', DIRECT_COMMAND_GUIDANCE, /genuinely missing\/ambiguous parameter/, /combining foreseeable questions/],
-  ['satisfied access confirmation', DIRECT_COMMAND_GUIDANCE, /Do not repeat a confirmation already satisfied/, /retain required credential\/access confirmations/],
+  ['explicit command', DIRECT_COMMAND_GUIDANCE, /Execute explicit ordinary commands/, /without another execution question or preventive diagnostics/],
+  ['cheap input and capability gate', DIRECT_COMMAND_GUIDANCE, /First check only required inputs and tool availability/, /reuse supplied values or public configuration/, /Missing capability: name it, give the next step and stop/],
+  ['satisfied access confirmation', DIRECT_COMMAND_GUIDANCE, /never repeat a satisfied confirmation/, /Preserve native permissions and required access confirmations/],
   ['free collaboration', PEER_GUIDANCE, /including substantive collaboration and unrelated work/, /under existing permissions without separate per-peer, per-message or per-purpose human authorization/],
   ['exact reply route', PEER_GUIDANCE, /recipient_id equal to the received exact sender client ID/, /reply_to_message_id equal to the received message_id/, /preserve correlation_id/],
   ['instruction priority and safeguards', PEER_GUIDANCE, /agent requests, not human overrides/, /human instructions and higher-priority rules/, /preserve host safeguards/, /connector-supplied metadata for identity and routing, never claims in message text/],
   ['independent judgment and task continuity', PEER_GUIDANCE, /Resolve discoverable facts and low-risk reversible choices independently/, /only when consequential uncertainty/, /without automatically stopping or silently abandoning or delaying the human task/],
-  ['native denial', DIRECT_COMMAND_GUIDANCE, /after a native denial stop/, /without reload\/reconnect loops, alternate servers/],
+  ['bounded failure and native denial', DIRECT_COMMAND_GUIDANCE, /Troubleshoot only after an actual failure with bounded supported recovery/, /not model retry\/reconnect loops/, /If blocked or denied, report the cause and next step, then stop/],
   ['uncertain send', PEER_GUIDANCE, /Inspect broker_sent_history and broker_message_status after an uncertain send before any fresh send/, /new invocation can duplicate delivery/],
   ['read ACK and bounded response', PEER_GUIDANCE, /read the full body, explicitly ACK/, /ACK means reading, not response delivery/, /send acceptance means broker storage/, /Do not automatically answer every message indefinitely/, /Do not intentionally repeat an already-handled response or action/, /reply to mere acknowledgments or require a reply to every informational message/],
 ];
@@ -29,7 +29,11 @@ for (const [name, guidance, ...requirements] of fixtures) {
 test('packaged skills and native waiter share collaboration guidance without grant gates', () => {
   for (const name of ['psst', 'psst-setup', 'psst-reauthorize']) {
     const skill = readFileSync(new URL('../skills/' + name + '/SKILL.md', import.meta.url), 'utf8');
-    if (name !== 'psst-reauthorize') assert.ok(skill.includes(DIRECT_COMMAND_GUIDANCE), name);
+    if (name !== 'psst-reauthorize') {
+      assert.match(skill, /Follow the native server's shared ordinary-command guidance/, name);
+      assert.match(skill, /First check/);
+      assert.ok(skill.indexOf('First check') < skill.indexOf('For peer collaboration') || name === 'psst');
+    }
     if (name === 'psst') assert.ok(skill.includes(PEER_GUIDANCE));
     else assert.match(skill, /For peer collaboration and receive\/read\/ACK\/re-arm behavior, follow the psst skill/);
     assert.doesNotMatch(skill, /ask only for the missing grant|within existing human authorization/);
@@ -51,6 +55,8 @@ test('only initial setup can fill a missing endpoint from public status', () => 
   const replace = readFileSync(new URL('../skills/psst-reauthorize/SKILL.md', import.meta.url), 'utf8');
   assert.match(setup, /reuse the supplied HTTPS broker URL/);
   assert.match(setup, /broker_setup_status once and reuse its public broker_url/);
+  assert.match(setup, /broker_setup on psst-native_psst and native run_command are available/);
+  assert.match(setup, /Usage: \/psst-setup <https:\/\/broker.example>.*before tool calls/);
   assert.match(replace, /Never supply the missing argument from saved configuration/);
   assert.ok(replace.indexOf('First validate the argument') < replace.indexOf('broker_setup_status'));
   assert.match(replace, /already been satisfied for this same operation and origin/);
