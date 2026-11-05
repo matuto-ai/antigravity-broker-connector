@@ -86,6 +86,14 @@ pending approval, never a separately valid approved credential. While
 replacement is pending, status returns the approval waiter even if the old
 connection is still active, so its completion can re-arm the new inbox.
 
+## Automatic transport recovery
+
+An attached native conversation supervises connectivity and reception without model calls. A transient network/proxy outage leaves low-frequency heartbeat supervision running. Recovery attempts are bounded and spaced within a round; exhausting a round waits for another eligible supervision interval rather than requiring manual connect. A validated stale-lease response also establishes reachability and triggers reconciliation of the existing owned session, even before a heartbeat can succeed. Successful heartbeat alone does not prove reception: a stopped receive loop is restarted, while empty mailbox polls are healthy and ordinary in-flight long polls are not treated as stalls.
+
+Recovery retains the same client identity, journal, saved authorization and pending operation keys. Durable broker delivery still requires inbox storage first; recovery never records model-read acknowledgments or sends replies. Explicit disconnect, human delivery pauses and native lifetime changes fence old work. Revocation, confirmed identity expiry/mismatch, invalid successful responses and permanent storage/security failures remain blockers; automatic recovery does not replace their mailbox or authorization.
+
+`broker_setup_status` and `broker_identity` include a bounded `transport` snapshot with separate `heartbeat`, `reception`, `recovery` and `error_code` fields. Setup status distinguishes `transport_attached` from healthy `connected`; active automatic waiting reports `reconnecting`, and a permanent transport failure reports `blocked`. Restored reception clears the active failure rather than retaining a historical diagnostic. These transport observations do not certify native wakeup or model processing. Keep the existing inbox waiter armed during transient recovery; no model polling or new setup approval is needed. See [reproducible checks and evidence limits](verification.md#reproducing-outage-and-return).
+
 ## Ordinary commands
 
 Explicit setup and messaging commands execute through the supported native tools without another execution question or preventive diagnostics. The native server supplies shared command guidance; skills first check only the required inputs and capabilities. Setup needs `broker_setup` on `psst-native_psst` and native `run_command` for its waiter; `broker_setup_status` is needed only when no URL was supplied. A supplied invalid broker origin returns usage before tool calls. Messaging checks its requested tool and required arguments, using supplied exact recipient IDs or normal recipient discovery. Missing input gets one focused question; missing capability gets its name and the next step to enable the native plugin/tool, then stops.

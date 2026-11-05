@@ -14,7 +14,7 @@ import { PEER_GUIDANCE } from '../src/native-waiter.mjs';
 const nativeMeta = id => ({ 'antigravity.google/root_conversation_id': id, 'antigravity.google/conversation_id': id });
 const barrier = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 
-async function fixture(t, { failure, selected = true, approvalApi, tools = {} } = {}) {
+async function fixture(t, { failure, selected = true, approvalApi, tools = {}, transportStatus } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'native-owner-unit-'));
   let server;
   t.after(async () => { await server?.close(); rmSync(root, { recursive: true, force: true }); });
@@ -42,6 +42,7 @@ async function fixture(t, { failure, selected = true, approvalApi, tools = {} } 
       calls.push(options); await failure?.(calls.length, options);
       const id = identities.get(options.conversationId) ?? randomUUID(); identities.set(options.conversationId, id);
       const session = { identity: { client_id: id }, inbox: { directory: join(root, 'inbox-' + options.conversationId) },
+        ...(transportStatus?{transportStatus}:{}),
         tools: { broker_identity: async () => ({ client_id: id }), ...tools }, closes: [],
         async close(options) { this.closes.push(options); } };
       sessions.push(session); return session;
@@ -363,4 +364,47 @@ test('failed replacement attachment retains the old transport and an explicit re
  assert.equal(begins.length,2);assert.equal(begins[1].replaceRequestId,undefined);
  assert.equal(f.installation.selected().requestId,result.requestId);
  assert.equal(f.sessions[0].closes.length,1);
+});
+
+test('native status distinguishes attached transport, active retry, and restored reception', async t => {
+  let transport={heartbeat:'healthy',reception:'polling',recovery:'idle',error_code:null};
+  const f=await fixture(t,{transportStatus:()=>({...transport})}),id=randomUUID();
+  const starting=await f.call(id);
+  assert.equal(starting.transport_attached,true);assert.equal(starting.connected,false);
+  transport={heartbeat:'healthy',reception:'retry_waiting',recovery:'retry_waiting',error_code:'request_failed'};
+  const waiting=await f.call(id);
+  assert.equal(waiting.connected,false);assert.equal(waiting.request_connection_state,'reconnecting');
+  assert.equal(waiting.readiness,'reconnecting');assert.equal(waiting.waiter_command,waiterCommand(f.server.directory));
+  transport={heartbeat:'healthy',reception:'healthy',recovery:'idle',error_code:null};
+  const restored=await f.call(id);
+  assert.equal(restored.connected,true);assert.equal(restored.request_connection_state,'connected');
+  assert.equal(restored.transport.error_code,null);assert.equal(f.calls.length,1);
+  await f.call(id,'broker_disconnect');
+  assert.equal((await f.call(id)).transport,undefined);
+});
+
+test('permanent transport blockers retain diagnostics without replacement or automatic enrollment', async t => {
+  for(const code of ['session_expired','session_mismatch','forbidden','storage_unavailable']){
+    const f=await fixture(t),id=randomUUID();await f.call(id);
+    const selected=f.installation.selected(),clientId=f.sessions[0].identity.client_id;
+    const transport={heartbeat:'blocked',reception:'blocked',recovery:'blocked',error_code:code};
+    f.calls[0].onUnavailable({code,conversationId:id,transport});
+    await new Promise(resolve=>setImmediate(resolve));f.advance(600000);
+    const status=await f.call(id);
+    assert.equal(status.connected,false);assert.equal(status.readiness,'blocked');
+    assert.deepEqual(status.transport,transport);assert.equal(status.waiter_command,undefined);
+    assert.equal(f.calls.length,1);assert.equal(f.sessions[0].identity.client_id,clientId);
+    assert.deepEqual(f.installation.selected(),selected);
+  }
+});
+
+test('an old lifetime callback cannot disconnect a later attachment of the same client', async t => {
+  const f=await fixture(t),id=randomUUID();await f.call(id);
+  const old=f.calls[0],clientId=f.sessions[0].identity.client_id;
+  await f.call(id,'broker_disconnect');
+  await f.call(id,'broker_connect',{connection_file:f.connectionFile});
+  assert.equal(f.sessions[1].identity.client_id,clientId);
+  old.onUnavailable({code:'session_expired',conversationId:id,transport:{recovery:'blocked'}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal((await f.call(id)).connected,true);assert.equal(f.sessions[1].closes.length,0);
 });

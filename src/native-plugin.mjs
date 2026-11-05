@@ -102,27 +102,24 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
     return nativeMetadata(config,event,{host,conversationId});
   }
   async function createSession(options){if(recoveryBlocked)throw Object.assign(Error('native_incarnation_uncertain'),{code:'native_incarnation_uncertain'});try{return await sessionFactory(options);}catch(error){if(error.code==='native_incarnation_uncertain')recoveryBlocked=true;throw error;}}
-  // A confirmed v2 self-expiry may rebuild only this still-selected native owner.
-  async function unavailableCandidate(candidate, reason, {conversationId,file,registrationVersion}) {
-    if(!candidate||closed||transitioning||session?.identity.client_id!==candidate.identity.client_id||session.conversationId!==conversationId||!binding.isBound(conversationId))return;
-    if(reason?.code==='session_expired'&&reason.conversationId!==conversationId)return;
-    const source=session.source;
-    const recover=registrationVersion===2&&reason?.code==='session_expired'&&reason.conversationId===conversationId;
-    manager?.attention();const expectedEpoch=epoch+1;await disconnect();
-    if(recover&&!closed&&!disabled&&epoch===expectedEpoch&&binding.isBound(conversationId)&&isHostAlive()){
-      recoverySource={conversationId,file,source,expectedEpoch};void tick();
-    }
+  let lastTransportStatus;
+  async function unavailableCandidate(candidate, reason, {conversationId}) {
+    if(!candidate||closed||transitioning||session!==candidate||session.conversationId!==conversationId||!binding.isBound(conversationId))return;
+    if(reason?.conversationId&&reason.conversationId!==conversationId)return;
+    lastTransportStatus=reason?.transport;
+    if(lastTransportStatus?.recovery==='blocked')recoveryBlocked=true;
+    manager?.attention();await disconnect();
   }
   async function prepareApproved(file,startupSetupGeneration){
     const conversationId=binding.assertHost().conversation,startedEpoch=epoch,startedGeneration=rootGeneration;
     if(!conversationId||closed||!isHostAlive())throw Error('native_host_unavailable');
     const config=configReader(file,{});
     const registrationConfig={...config,metadata:observedMetadata(config,conversationId)};
-    let candidate;candidate=await createSession({config:registrationConfig,conversationId,observeMetadata:()=>observedMetadata(config,conversationId),isAlive:()=>isHostAlive()&&rootGeneration===startedGeneration&&binding.isBound(conversationId),signal:controller.signal,onUnavailable:reason=>{void unavailableCandidate(candidate,reason,{conversationId,file,registrationVersion:config.registrationVersion??1}).catch(()=>{});}});
+    let candidate;candidate=await createSession({config:registrationConfig,conversationId,observeMetadata:()=>observedMetadata(config,conversationId),isAlive:()=>isHostAlive()&&rootGeneration===startedGeneration&&binding.isBound(conversationId),signal:controller.signal,onUnavailable:reason=>{void unavailableCandidate(candidate,reason,{conversationId}).catch(()=>{});}});
     if(!currentRoot(conversationId,startedGeneration)||epoch!==startedEpoch||(startupSetupGeneration!==undefined&&startupSetupGeneration!==setupGeneration)){await candidate.close({closeSession:false});throw Error('native_host_unavailable');}
-    return {...candidate,conversationId,rootGeneration:startedGeneration,startupSetupGeneration,source:{connection_file:file}};
+    return candidate={...candidate,conversationId,rootGeneration:startedGeneration,startupSetupGeneration,source:{connection_file:file}};
   }
-  async function stageApproved(candidate){if(!currentRoot(candidate.conversationId,candidate.rootGeneration)||(candidate.startupSetupGeneration!==undefined&&candidate.startupSetupGeneration!==setupGeneration)){await candidate.close({closeSession:false});throw Error('native_root_changed');}const old=session,oldDisabled=disabled,oldReconnectAt=reconnectAt;session=candidate;disabled=false;reconnectAt=0;const stagedEpoch=++epoch;try{state();}catch(error){session=old;disabled=oldDisabled;reconnectAt=oldReconnectAt;throw error;}
+  async function stageApproved(candidate){if(!currentRoot(candidate.conversationId,candidate.rootGeneration)||(candidate.startupSetupGeneration!==undefined&&candidate.startupSetupGeneration!==setupGeneration)){await candidate.close({closeSession:false});throw Error('native_root_changed');}const old=session,oldDisabled=disabled,oldReconnectAt=reconnectAt;session=candidate;lastTransportStatus=undefined;disabled=false;reconnectAt=0;const stagedEpoch=++epoch;try{state();}catch(error){session=old;disabled=oldDisabled;reconnectAt=oldReconnectAt;throw error;}
     return {async rollback(){if(epoch===stagedEpoch&&session===candidate){session=old;disabled=oldDisabled;reconnectAt=oldReconnectAt;epoch++;state();}else{try{await old?.close();}catch{}}},async finalize(){try{await old?.close();}catch{/* Selected new session remains usable despite old cleanup failure. */}}};
   }
   async function attachApproved(candidate){const staged=await stageApproved(candidate);await staged.finalize();}
@@ -133,10 +130,10 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
       const conversationId=binding.assertHost().conversation;
       if(!currentRoot(conversationId,generation))throw Error('native_root_changed');
       installation.suppressSetup(conversationId,false);installation.setSessionDisabled(conversationId,false);
-      setupGeneration++;approvalResumed=true;disabled=false;reconnectAt=0;state();recoveryBlocked=false;recoverySource=undefined;
+      setupGeneration++;approvalResumed=true;disabled=false;reconnectAt=0;state();recoveryBlocked=false;
     },activate:{prepare:prepareApproved,commit:stageApproved}});}
   manager=newManager();
-  let attemptedRevision,approvalResumed=false,ticking=false,recoverySource,reconnectAt=0,reconnectFailures=0;
+  let attemptedRevision,approvalResumed=false,ticking=false,reconnectAt=0,reconnectFailures=0;
   function tick(){if(ticking||closed||transitioning)return tickPromise??Promise.resolve();tickPromise=runTick();return tickPromise;}
   async function runTick(){
     if(ticking||closed||transitioning)return;ticking=true;const generation=rootGeneration,activeManager=manager;
@@ -145,12 +142,6 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
       if(recoveryBlocked)return;
       if(!binding.assertHost().conversation)return;
       if(installation.sessionDisabled(binding.assertHost().conversation))disabled=true;
-      if(recoverySource&&!session&&!connecting&&!disabled){
-        const recovery=recoverySource;recoverySource=undefined; // One attempt; uncertainty never causes tick churn.
-        if(epoch!==recovery.expectedEpoch||!binding.isBound(recovery.conversationId))return;
-        connecting=true;
-        try{const candidate=await prepareApproved(recovery.file);candidate.source=recovery.source;await attachApproved(candidate);}catch(error){recoveryBlocked=true;throw error;}finally{connecting=false;}
-      }
       if(!session&&!connecting&&!disabled&&manager.status.state!=='pending'){
        const selected=installation.selected();if(selected&&(attemptedRevision!==selected.revision||(reconnectAt&&now()>=reconnectAt))){
         if(attemptedRevision!==selected.revision)reconnectFailures=0;
@@ -187,7 +178,21 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
         throw error;
       }
     }
-    if(def.name==='broker_setup_status'){await tick();const waiting=['pending','reconnecting'].includes(manager.status.state);const pending=installation.pending(),selected=installation.selected();const brokerUrl=pending&&!pending.cancelled?pending.brokerUrl:selected?.brokerUrl??pending?.brokerUrl;return {...manager.status,broker_url:brokerUrl??null,request_connection_state:manager.status.state==='approved'&&session?'connected':manager.status.approval_state==='approved'?'approved_not_connected':manager.status.state==='pending'?'pending':'not_connected',connector_runtime:CONNECTOR_RUNTIME,connected:Boolean(session),mode:'automatic_required',readiness:session?'native_wakeup_acceptance_unverified':reconnectAt?'reconnecting':'not_connected',...(reconnectAt?{retry_after_ms:Math.max(0,reconnectAt-now())}:{}),...(waiting?{waiter_command:approvalWaiterCommand(directory)}:session?{waiter_command:waiterCommand(directory)}:{})};}
+    if(def.name==='broker_setup_status'){
+      await tick();
+      const waiting=['pending','reconnecting'].includes(manager.status.state);
+      const pending=installation.pending(),selected=installation.selected();
+      const brokerUrl=pending&&!pending.cancelled?pending.brokerUrl:selected?.brokerUrl??pending?.brokerUrl;
+      const transport=session?.transportStatus?.()??lastTransportStatus;
+      const retrying=transport&&['retry_waiting','recovering'].includes(transport.recovery);
+      const connected=Boolean(session)&&(!transport||transport.heartbeat==='healthy'&&['healthy','paused','disabled'].includes(transport.reception)&&transport.recovery==='idle');
+      return {...manager.status,broker_url:brokerUrl??null,
+        request_connection_state:manager.status.state==='pending'?'pending':retrying?'reconnecting':manager.status.state==='approved'&&connected?'connected':manager.status.approval_state==='approved'?'approved_not_connected':'not_connected',
+        connector_runtime:CONNECTOR_RUNTIME,connected,transport_attached:Boolean(session),...(transport?{transport}:{}),mode:'automatic_required',
+        readiness:retrying||reconnectAt?'reconnecting':connected?'native_wakeup_acceptance_unverified':transport?.recovery==='blocked'?'blocked':'not_connected',
+        ...(reconnectAt?{retry_after_ms:Math.max(0,reconnectAt-now())}:{}),
+        ...(waiting?{waiter_command:approvalWaiterCommand(directory)}:session?{waiter_command:waiterCommand(directory)}:{})};
+    }
     if(def.name==='broker_cancel_setup'){approvalResumed=true;installation.suppressSetup(verified.conversationId,true);return manager.cancel();}
     if(def.name==='broker_connect') {
       if(connecting)throw Error('native_connect_in_progress');
@@ -197,7 +202,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
         if(session.source.pairing_file!==a.pairing_file||session.source.connection_file!==a.connection_file)throw Error('disconnect_before_repair');
         return {connected:true,...session.identity,waiter_command:waiterCommand(directory),automatic_delivery_certified:false};
       }
-      const wasRecoveryBlocked=recoveryBlocked;recoveryBlocked=false;recoverySource=undefined;connecting=true;
+      const wasRecoveryBlocked=recoveryBlocked;recoveryBlocked=false;connecting=true;
       const startedEpoch=epoch,startedGeneration=rootGeneration;attempt=new AbortController();
       try {
         const file=a.connection_file??(await pair({pairingFile:a.pairing_file,directory:join(dirname(base),'installation')})).connectionFile;
@@ -205,14 +210,14 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
         const registrationConfig={...config,metadata:observedMetadata(config,verified.conversationId)};
         if(closed||epoch!==startedEpoch)throw Error('native_host_unavailable');
         let candidate;candidate=await createSession({config:registrationConfig,conversationId:verified.conversationId,observeMetadata:()=>observedMetadata(config,verified.conversationId),isAlive:()=>isHostAlive()&&rootGeneration===startedGeneration&&binding.isBound(verified.conversationId),signal:AbortSignal.any([controller.signal,attempt.signal]),
-          onUnavailable:reason=>{void unavailableCandidate(candidate,reason,{conversationId:verified.conversationId,file,registrationVersion:config.registrationVersion??1}).catch(()=>{});}});
+          onUnavailable:reason=>{void unavailableCandidate(candidate,reason,{conversationId:verified.conversationId}).catch(()=>{});}});
         if(!currentRoot(verified.conversationId,startedGeneration)||epoch!==startedEpoch){await candidate.close({closeSession:false});throw Error('native_host_unavailable');}
-        installation.setSessionDisabled(verified.conversationId,false);disabled=false;reconnectAt=0;session={...candidate,conversationId:verified.conversationId,source:a};epoch++;
+        installation.setSessionDisabled(verified.conversationId,false);disabled=false;reconnectAt=0;lastTransportStatus=undefined;session=candidate={...candidate,conversationId:verified.conversationId,source:a};epoch++;
         try{state();}catch{await disconnect();throw Error('native_state_unavailable');}
         return {connected:true,...session.identity,waiter_command:waiterCommand(directory),automatic_delivery_certified:false};
       } catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;} finally{connecting=false;attempt=undefined;}
     }
-    if(def.name==='broker_disconnect'){installation.suppressSetup(verified.conversationId,true);installation.setSessionDisabled(verified.conversationId,true);disabled=true;manager.cancel();await disconnect();return {connected:false};}
+    if(def.name==='broker_disconnect'){installation.suppressSetup(verified.conversationId,true);installation.setSessionDisabled(verified.conversationId,true);disabled=true;lastTransportStatus=undefined;manager.cancel();await disconnect();return {connected:false};}
     if(!session||session.conversationId!==verified.conversationId)throw Error('native_not_connected');
     const admitted=session,admittedEpoch=epoch;const result=await admitted.tools[def.name](verified.args,context);
     if(closed||epoch!==admittedEpoch||session!==admitted)throw Error('native_session_changed_receipt_retained');
@@ -227,7 +232,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
         const error=new LocalError('native_root_setup_required');error.message='Call broker_setup_status in this native conversation before using other broker tools. The active root was not changed.';throw error;
       }
       // Freeze all old callbacks before draining. Keep the inspected permit until CAS.
-      transitioning=true;rootGeneration++;epoch++;attempt?.abort();recoverySource=undefined;
+      transitioning=true;rootGeneration++;epoch++;attempt?.abort();lastTransportStatus=undefined;
       const oldManager=manager,old=session;session=undefined;oldManager.close();
       try {
         state();
