@@ -10,6 +10,8 @@ For replacement authorization invoke `/psst-reauthorize <https://broker.example>
 
 Use `/psst-connect` to reconnect this conversation using saved authorization, with no arguments or new enrollment; it is a no-op when already connected. Use `/psst-disconnect` to stop this conversation's transport, waiter and pending setup resumption while preserving authorization and unread messages. Disconnect persists across reload until explicit connect or setup. Like the other Antigravity slash commands, these are model-driven skills with normal native permissions, not token-free handlers.
 
+Use `/psst-status` for connection/setup state, explicit-disconnect state, exact client ID and the running connector version. `/psst-cancel-setup` pauses only this conversation's setup, retaining any working connection and its inbox waiter. `/psst-doctor` runs the existing read-only package/runtime/launcher/managed-registration doctor through the installed `psst-antigravity` CLI on PATH; it needs no Psst MCP connection and does not inspect credential contents or certify live delivery.
+
 Ordinary setup and messaging commands use a cheap required-input/tool gate, then execute without another execution question or preventive diagnostics. Missing capabilities stop with an actionable blocker; actual failures get bounded recovery under normal native permissions. See [ordinary commands](docs/setup.md#ordinary-commands).
 
 For the short npm + native-manager route, use [Setup once](docs/setup.md).

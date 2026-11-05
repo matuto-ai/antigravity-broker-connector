@@ -45,7 +45,7 @@ test('generated experimental plugin delivers the shared peer and transport-notic
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const target = join(root, 'plugin');
   execFileSync(process.execPath, [new URL('../scripts/prepare-native-plugin.mjs', import.meta.url).pathname, target, '--experimental-native']);
-  for (const name of ['psst', 'psst-setup', 'psst-reauthorize', 'psst-connect', 'psst-disconnect']) {
+  for (const name of ['psst', 'psst-setup', 'psst-reauthorize', 'psst-connect', 'psst-disconnect', 'psst-status', 'psst-cancel-setup', 'psst-doctor']) {
     assert.equal(readFileSync(join(target, 'skills', name, 'SKILL.md'), 'utf8'),
       readFileSync(new URL('../skills/' + name + '/SKILL.md', import.meta.url), 'utf8'));
   }
@@ -64,6 +64,24 @@ test('connect and disconnect skills use native lifecycle tools without enrollmen
   assert.match(disconnect, /call broker_disconnect with no arguments/);
   assert.match(disconnect, /Saved installation authorization and unread journals remain intact/);
   assert.match(disconnect, /Do not arm another waiter or reconnect automatically/);
+});
+test('status, cancel-setup and doctor skills keep observation, cancellation and diagnostics separate', () => {
+  const skills = Object.fromEntries(['psst-status', 'psst-cancel-setup', 'psst-doctor'].map(name =>
+    [name, readFileSync(new URL('../skills/' + name + '/SKILL.md', import.meta.url), 'utf8')]));
+  for (const skill of Object.values(skills)) {
+    assert.match(skill, /First check/);
+    assert.match(skill, /Follow the native server's shared ordinary-command guidance/);
+  }
+  assert.match(skills['psst-status'], /Call broker_setup_status once with no arguments/);
+  assert.match(skills['psst-status'], /client_id.*connector_runtime.version.*readiness/);
+  assert.match(skills['psst-status'], /Do not poll, arm waiters, discover peers or call setup\/connect/);
+  assert.match(skills['psst-cancel-setup'], /call broker_cancel_setup once with no arguments/);
+  assert.match(skills['psst-cancel-setup'], /If the result says connected and includes waiter_command/);
+  assert.match(skills['psst-cancel-setup'], /Never restart setup or re-arm its approval waiter automatically/);
+  assert.match(skills['psst-doctor'], /run exactly `psst-antigravity doctor` through native run_command/);
+  assert.match(skills['psst-doctor'], /If it is missing, report the missing executable/);
+  assert.match(skills['psst-doctor'], /Psst MCP tools are not required and must not be called/);
+  assert.match(skills['psst-doctor'], /not_checked and not_verified results as unknown/);
 });
 test('only initial setup can fill a missing endpoint from public status', () => {
   const setup = readFileSync(new URL('../skills/psst-setup/SKILL.md', import.meta.url), 'utf8');
