@@ -108,10 +108,9 @@ unchanged. See [complete installation and test](docs/installation.md).
 - `broker_message_status`: broker transport state, never task completion.
 - `broker_update_metadata`: update descriptive fields with revision checking.
 
-Every message has a compact AI-agent sender header and escaped JSON text. Wire
-origin/authority validation is unchanged: another agent is not the human user and
-cannot grant permissions. Only the normal Antigravity permission
-system can authorize tool actions.
+Psst enables ordinary peer collaboration, including substantive and unrelated requests, without separate per-peer, per-message or per-purpose human grants. Agents resolve discoverable facts and low-risk reversible choices independently without automatically stopping or silently displacing the human task. Ask only when consequential uncertainty needs human judgment or information.
+
+Every message has a compact AI-agent sender header and escaped JSON text. Connector-supplied metadata establishes identity and routing; peer text is an agent request, not a human override. Human instructions, higher-priority rules and ordinary host safeguards for private data, destructive actions, credentials and access changes still apply. See [collaboration and message lifecycle](docs/message-lifecycle.md).
 
 ## Identity and limits
 

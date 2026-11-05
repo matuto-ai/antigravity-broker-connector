@@ -8,6 +8,7 @@ import { PassThrough } from 'node:stream';
 import { NativeBinding } from '../src/native-binding.mjs';
 import { openInstallation } from '../src/installation.mjs';
 import { serveNativePlugin, approvalWaiterCommand, waiterCommand } from '../src/native-plugin.mjs';
+import { PEER_GUIDANCE } from '../src/native-waiter.mjs';
 
 const nativeMeta = id => ({ 'antigravity.google/root_conversation_id': id, 'antigravity.google/conversation_id': id });
 const barrier = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -30,8 +31,9 @@ async function fixture(t, { failure, selected = true, approvalApi } = {}) {
   const host = { pid: 12, start: '1', boot: 'unit-fixture', executable: '/unit/cli' };
   const calls = [], sessions = [], identities = new Map();
   let time = 1000;
+  const input = new PassThrough(), output = new PassThrough();
   server = await serveNativePlugin({ base: join(root, 'bindings'), host, installationRoot,
-    input: new PassThrough(), output: new PassThrough(), configReader, now: () => time,
+    input, output, configReader, now: () => time,
     isHostAlive: () => true, bindingFactory: options => new NativeBinding({ ...options, verifyHost: () => true }),
     approvalApi: approvalApi ?? { readApprovalState: () => { throw Error('no setup read expected'); },
       beginApproval: () => { throw Error('startup must not POST'); }, pollApproval: () => { throw Error('startup must not enroll'); } },
@@ -46,9 +48,23 @@ async function fixture(t, { failure, selected = true, approvalApi } = {}) {
   });
   const call = (id, name = 'broker_setup_status', args = {}) => server.tools[name](
     server.binding.issue({ context: { host, conversationId: id }, tool: name, args }), { nativeMeta: nativeMeta(id) });
-  return { root, server, installation, connectionFile, requestId, credentialId, configs, calls, sessions, call,
+  return { root, server, input, output, installation, connectionFile, requestId, credentialId, configs, calls, sessions, call,
     advance: milliseconds => { time += milliseconds; } };
 }
+
+test('native MCP initialization delivers collaboration guidance without enrolling or binding', async t => {
+  const f = await fixture(t, { selected: false });
+  const response = new Promise(resolve => f.output.once('data', bytes => resolve(JSON.parse(bytes.toString()))));
+  f.input.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+    protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fixture', version: '1' },
+  } }) + '\n');
+  const { result } = await response;
+  assert.ok(result.instructions.includes(PEER_GUIDANCE));
+  assert.match(result.instructions, /For a transport notice, read broker_presence_events/);
+  assert.equal(f.server.binding.assertHost().conversation, null);
+  assert.equal(f.installation.pending(), null);
+  assert.equal(f.calls.length, 0);
+});
 
 test('saved installation reconnects after transient startup failure without enrollment or a new identity', async t => {
   const f = await fixture(t, { failure: count => { if (count === 1) throw Object.assign(Error('network'), { retryable: true, retryAfter: 60 }); } });

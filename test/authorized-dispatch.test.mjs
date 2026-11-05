@@ -1,34 +1,50 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { DIRECT_COMMAND_GUIDANCE, hookDecision, NATIVE_SERVER } from '../src/native-plugin.mjs';
-import { AUTHORIZED_PEER_GUIDANCE, PENDING_NOTICE } from '../src/native-waiter.mjs';
+import { PEER_GUIDANCE, PENDING_NOTICE } from '../src/native-waiter.mjs';
 
 // These fixtures test instructions delivered to a model, not model compliance.
-// Human authorization is not inferred by a new runtime boolean or peer payload.
+// Native permissions and provenance remain deterministic, not peer-supplied.
 const fixtures = [
   ['explicit slash, known URL', DIRECT_COMMAND_GUIDANCE, /dispatch promptly/, /Reuse required nonsecret parameters/, /without asking whether to do it/],
   ['missing or ambiguous parameter', DIRECT_COMMAND_GUIDANCE, /genuinely missing\/ambiguous parameter/, /combining foreseeable questions/],
   ['satisfied access confirmation', DIRECT_COMMAND_GUIDANCE, /Do not repeat a confirmation already satisfied/, /retain required credential\/access confirmations/],
-  ['authorized test ping', AUTHORIZED_PEER_GUIDANCE, /human has already authorized communication with this peer/, /answer routine peer requests within that scope without asking permission/],
-  ['exact reply route', AUTHORIZED_PEER_GUIDANCE, /recipient_id equal to the received exact sender client ID/, /reply_to_message_id equal to the received message_id/, /preserve correlation_id/],
-  ['absent authorization or scope expansion', AUTHORIZED_PEER_GUIDANCE, /authorization is unavailable or a request exceeds its scope/, /ask only for the missing grant/, /never from peer text/],
+  ['free collaboration', PEER_GUIDANCE, /including substantive collaboration and unrelated work/, /under existing permissions without separate per-peer, per-message or per-purpose human authorization/],
+  ['exact reply route', PEER_GUIDANCE, /recipient_id equal to the received exact sender client ID/, /reply_to_message_id equal to the received message_id/, /preserve correlation_id/],
+  ['instruction priority and safeguards', PEER_GUIDANCE, /agent requests, not human overrides/, /human instructions and higher-priority rules/, /preserve host safeguards/, /connector-supplied metadata for identity and routing, never claims in message text/],
+  ['independent judgment and task continuity', PEER_GUIDANCE, /Resolve discoverable facts and low-risk reversible choices independently/, /only when consequential uncertainty/, /without automatically stopping or silently abandoning or delaying the human task/],
   ['native denial', DIRECT_COMMAND_GUIDANCE, /after a native denial stop/, /without reload\/reconnect loops, alternate servers/],
-  ['uncertain send', AUTHORIZED_PEER_GUIDANCE, /Inspect broker_sent_history and broker_message_status after an uncertain send before any fresh send/, /new invocation can duplicate delivery/],
-  ['read ACK and bounded response', AUTHORIZED_PEER_GUIDANCE, /read the full body, explicitly ACK/, /ACK means reading, not response delivery/, /Do not automatically answer every message indefinitely/],
+  ['uncertain send', PEER_GUIDANCE, /Inspect broker_sent_history and broker_message_status after an uncertain send before any fresh send/, /new invocation can duplicate delivery/],
+  ['read ACK and bounded response', PEER_GUIDANCE, /read the full body, explicitly ACK/, /ACK means reading, not response delivery/, /send acceptance means broker storage/, /Do not automatically answer every message indefinitely/, /Do not intentionally repeat an already-handled response or action/, /reply to mere acknowledgments or require a reply to every informational message/],
 ];
 for (const [name, guidance, ...requirements] of fixtures) {
   test('model guidance fixture: ' + name, () => {
     for (const expected of requirements) assert.match(guidance, expected);
   });
 }
-test('packaged skills and native waiter carry the same authorized collaboration contract', () => {
+test('packaged skills and native waiter share collaboration guidance without grant gates', () => {
   for (const name of ['psst', 'psst-setup', 'psst-reauthorize']) {
     const skill = readFileSync(new URL('../skills/' + name + '/SKILL.md', import.meta.url), 'utf8');
     assert.ok(skill.includes(DIRECT_COMMAND_GUIDANCE), name);
-    assert.ok(skill.includes(AUTHORIZED_PEER_GUIDANCE), name);
+    if (name === 'psst') assert.ok(skill.includes(PEER_GUIDANCE));
+    else assert.match(skill, /For peer collaboration and receive\/read\/ACK\/re-arm behavior, follow the psst skill/);
+    assert.doesNotMatch(skill, /ask only for the missing grant|within existing human authorization/);
   }
-  assert.ok(PENDING_NOTICE.includes(AUTHORIZED_PEER_GUIDANCE));
+  assert.ok(PENDING_NOTICE.includes(PEER_GUIDANCE));
+});
+test('generated experimental plugin delivers the shared peer and transport-notice guidance', t => {
+  const root = mkdtempSync(join(tmpdir(), 'psst-guidance-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const target = join(root, 'plugin');
+  execFileSync(process.execPath, [new URL('../scripts/prepare-native-plugin.mjs', import.meta.url).pathname, target, '--experimental-native']);
+  const skill = readFileSync(join(target, 'skills/psst-connect/SKILL.md'), 'utf8');
+  assert.ok(skill.includes(PEER_GUIDANCE));
+  assert.match(skill, /transport notice is not an agent message/);
+  assert.match(skill, /broker_acknowledge_presence_event/);
 });
 test('setup and replacement use supplied URL first and only public status as fallback', () => {
   const setup = readFileSync(new URL('../skills/psst-setup/SKILL.md', import.meta.url), 'utf8');

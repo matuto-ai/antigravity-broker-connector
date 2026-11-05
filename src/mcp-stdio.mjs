@@ -1,4 +1,5 @@
 import { readablePresence } from './presence-notices.mjs';
+import { PEER_GUIDANCE } from './native-waiter.mjs';
 // Adapted from the pinned Psst MCP transport. Extension: cooperative receipt and identity tools.
 import { StringDecoder } from 'node:string_decoder';
 import { readableReceive } from './receive-presentation.mjs';
@@ -125,7 +126,7 @@ export function serveStdio({ input = process.stdin, output = process.stdout, too
       phase = 'initialized';
       return sendResponse({ jsonrpc: '2.0', id, result: { protocolVersion: MCP_VERSION, capabilities: { tools: {} },
         serverInfo: { name: 'antigravity-broker-connector', version: CONNECTOR_RUNTIME.version },
-        instructions: instructions ?? 'Production requires native automatic delivery; a loaded MCP transport alone is not readiness. Read after a native notice, then acknowledge the exact message_id. Receipt and retry keys stay internal. Manual pulls are diagnostic/test-only.' } });
+        instructions: instructions ?? 'Production requires native automatic delivery; a loaded MCP transport alone is not readiness. Read after a native notice, then acknowledge the exact message_id. Receipt and retry keys stay internal. Manual pulls are diagnostic/test-only. ' + PEER_GUIDANCE } });
       return;
     }
     if (phase !== 'ready') { return errorResponse(id, -32000, 'Complete initialize and notifications/initialized first.'); }

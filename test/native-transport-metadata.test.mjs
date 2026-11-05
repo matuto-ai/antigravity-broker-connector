@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { PassThrough, Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { serveStdio, TOOL_DEFINITIONS } from '../src/mcp-stdio.mjs';
+import { PEER_GUIDANCE } from '../src/native-waiter.mjs';
 const ids=['broker_sent_history','broker_message_content','broker_resend','broker_cancel'];
 function rpc(tools,options={}){
  const input=new PassThrough(),responses=[];let text='';
@@ -13,6 +14,13 @@ function rpc(tools,options={}){
  const ready=async()=>{await call('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'fixture',version:'1'}});input.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');};
  return {server,call,send,ready};
 }
+
+test('diagnostic MCP initialization delivers shared peer guidance', async t => {
+ const f=rpc({});t.after(()=>f.server.close());
+ const response=await f.call('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'fixture',version:'1'}});
+ assert.ok(response.result.instructions.includes(PEER_GUIDANCE));
+ assert.match(response.result.instructions,/Manual pulls are diagnostic\/test-only/);
+});
 
 const self='11111111-1111-4111-8111-111111111111',root='22222222-2222-4222-8222-222222222222';
 const meta=(id=self,r=root)=>({'antigravity.google/conversation_id':id,'antigravity.google/root_conversation_id':r});
