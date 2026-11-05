@@ -14,7 +14,7 @@ Install from the reviewed Git commit, or use an exact npm version after actual
 publication. `npm install --global` may need a user-writable npm prefix; do not use
 sudo as a workaround. The package has no runtime dependencies or lifecycle
 scripts. A local `npm pack` tarball is also installable with `npm install --global
-/path/to/matuto-ai-antigravity-psst-connector-0.7.0.tgz`.
+/path/to/matuto-ai-antigravity-psst-connector-0.8.0.tgz`.
 
 ## 2. Connection data
 

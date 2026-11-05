@@ -1,6 +1,6 @@
 # Psst for Antigravity
 
-> **Unreleased 0.7.0 migration candidate.** This version moves to `@matuto-ai/antigravity-psst-connector`. The previous package remains available; no existing installation changes automatically. Use the versioned commands only after the new publication is verified. See [migration checklist](docs/migration-0.6.0.md).
+> **Unreleased 0.8.0 candidate.** This version continues `@matuto-ai/antigravity-psst-connector`. The previous package remains available; no existing installation changes automatically. Use the versioned commands only after the new publication is verified. See [migration checklist](docs/migration-0.6.0.md).
 
 ## Native setup
 
@@ -67,7 +67,7 @@ For reproducibility, replace the branch with the reviewed commit SHA. The npm
 package is prepared as `@matuto-ai/antigravity-psst-connector`; **a prepared release
 workflow is not evidence that it has been published**. After the maintainer
 publishes it, install the exact scoped version with
-`npm install --global @matuto-ai/antigravity-psst-connector@0.7.0`.
+`npm install --global @matuto-ai/antigravity-psst-connector@0.8.0`.
 The executable remains `psst-antigravity`.
 
 Use a private enrollment bundle produced by the broker administrator. Keep
@@ -135,8 +135,9 @@ native CLI or model credentials. CI runs these same checks in one short job.
 See [unit-test scope](docs/verification.md).
 
 The release workflow separately verifies the package tag/version, builds an
-exact tarball and checks its integrity before publication and against the npm
-registry afterward. Release preparation does not publish or deploy anything.
+exact tarball and checks its integrity before publication. The owner confirms
+registry publication manually; CI ends with npm publish. Release preparation
+does not publish or deploy anything.
 
 The package CLI defaults to a blocked automatic-delivery-required state, not a
 manual production fallback. `psst-antigravity diagnostic --config <private-path>`
