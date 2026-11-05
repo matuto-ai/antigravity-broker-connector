@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import { NativeBinding } from '../src/native-binding.mjs';
 import { openInstallation } from '../src/installation.mjs';
-import { serveNativePlugin, approvalWaiterCommand, waiterCommand, DIRECT_COMMAND_GUIDANCE } from '../src/native-plugin.mjs';
+import { serveNativePlugin, approvalWaiterCommand, waiterCommand, DIRECT_COMMAND_GUIDANCE, hookDecision, NATIVE_SERVER } from '../src/native-plugin.mjs';
 import { LocalError } from '../vendor/psst/reference/errors.mjs';
 import { PEER_GUIDANCE } from '../src/native-waiter.mjs';
 
@@ -251,6 +251,17 @@ test('native MCP dispatch fences invalid targets before setup changes and reache
  };
  await rpc('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'fixture',version:'1'}});
  f.input.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');
+ for(const args of [
+  {broker_url:'https://broker.example'},
+  {broker_url:'https://broker.example',__psst_permit:randomUUID()},
+  ...['replace','confirmed','human_invoked'].map(field=>f.server.binding.issue({
+   context:{host:f.host,conversationId:id},tool:'broker_setup',args:{broker_url:'https://broker.example',[field]:true},
+  })),
+ ]){
+  const response=await rpc('tools/call',{name:'broker_setup',arguments:args,_meta:nativeMeta(id)});
+  assert.ok(response.error);assert.equal(reads,0);assert.equal(posts,0);
+  assert.deepEqual(f.installation.selected(),selected);assert.deepEqual(f.installation.pending(),pending);
+ }
  for(const broker_url of [undefined,'https:broker.example','http://broker.example','https://broker.example/path','https://other.example']){
   const args=broker_url===undefined?{}:{broker_url};
   const response=await rpc('tools/call',{name:'broker_setup',arguments:f.server.binding.issue({context:{host:f.host,conversationId:id},tool:'broker_setup',args}),_meta:nativeMeta(id)});
@@ -266,7 +277,10 @@ test('native MCP dispatch fences invalid targets before setup changes and reache
   assert.deepEqual(f.installation.selected(),selected);assert.deepEqual(f.installation.pending(),pending);
  }
  const args={broker_url:'https://BROKER.EXAMPLE:443/'};
- const response=await rpc('tools/call',{name:'broker_setup',arguments:f.server.binding.issue({context:{host:f.host,conversationId:id},tool:'broker_setup',args}),_meta:nativeMeta(id)});
+ const decision=hookDecision({input:{toolCall:{name:'call_mcp_tool',args:{ServerName:NATIVE_SERVER,ToolName:'broker_setup',Arguments:args}}},
+  context:{host:f.host,conversationId:id},binding:f.server.binding,directory:f.server.directory});
+ assert.equal(decision.decision,'allow');assert.equal(decision.permissionOverrides,undefined);
+ const response=await rpc('tools/call',{name:'broker_setup',arguments:decision.overwrite.Arguments,_meta:nativeMeta(id)});
  assert.equal(response.result.isError,false);assert.equal(reads,1);assert.equal(posts,1);
  assert.equal(f.installation.pending().requestId,requestId);assert.deepEqual(f.installation.selected(),selected);
 });
@@ -296,11 +310,14 @@ test('invalid or mismatched setup leaves an explicitly disconnected conversation
  assert.equal(status.connected,false);assert.equal(status.waiter_command,undefined);assert.equal(f.calls.length,1);
 });
 
-test('reauthorization exposes only public origin and distinguishes pending replacement from old transport', async t => {
- let saved,posts=0;const requestId=randomUUID();
+test('native replacement joins the pending candidate and resumes after cancellation through the existing waiter path', async t => {
+ let saved,posts=0,creates=0;const requestId=randomUUID();
  const f=await fixture(t,{approvalApi:{readApprovalState:()=>saved,beginApproval:options=>{
-  posts++;assert.equal(options.brokerUrl,'https://broker.example');saved={state:'pending',requestId};return saved;
+  posts++;assert.equal(options.brokerUrl,'https://broker.example');
+  if(options.replaceRequestId){creates++;assert.equal(options.replaceRequestId,f.requestId);saved={state:'pending',requestId};}
+  return saved;
  },pollApproval:()=>saved}});
+ saved={state:'approved',requestId:f.requestId};
  const id=randomUUID();const initial=await f.call(id);
  assert.equal(initial.broker_url,'https://broker.example');assert.equal(initial.request_connection_state,'connected');
  await f.call(id,'broker_setup',{broker_url:initial.broker_url});
@@ -311,11 +328,23 @@ test('reauthorization exposes only public origin and distinguishes pending repla
  assert.equal((await f.call(id)).requestId,requestId);assert.equal(posts,2); // Helper deduplicates the same candidate.
  assert.equal(f.installation.selected().requestId,f.requestId);
  await f.call(id,'broker_cancel_setup');
+ assert.equal(f.installation.pending().requestId,requestId);
+ assert.equal((await f.call(id)).state,'cancelled');
+ const connectionFile=join(f.root,'replacement.json'),credentialId='enrolled-'+randomUUID();
+ f.configs.set(connectionFile,{...f.configs.get(f.connectionFile),enrollment:{credentialId}});
+ saved={state:'approved',requestId,connectionFile,credentialId};
+ await f.call(id,'broker_setup',{broker_url:'https://broker.example'});
+ await new Promise(resolve=>setImmediate(resolve));const connected=await f.call(id);
+ assert.equal(creates,1);assert.equal(posts,3);
+ assert.equal(connected.requestId,requestId);assert.equal(connected.request_connection_state,'connected');
+ assert.equal(connected.waiter_command,waiterCommand(f.server.directory));
+ assert.equal(f.installation.selected().requestId,requestId);assert.equal(f.sessions[0].closes.length,1);
 });
 
-test('approved but failed replacement attachment is not reported as connected even with old working transport', async t => {
- let saved,result;const f=await fixture(t,{failure:count=>{if(count>1)throw Error('attachment_failed');},
-  approvalApi:{readApprovalState:()=>saved,beginApproval:()=>saved=result,pollApproval:()=>saved}});
+test('failed replacement attachment retains the old transport and an explicit retry selects the same candidate', async t => {
+ let saved,result,failAttachment=true;const begins=[];
+ const f=await fixture(t,{failure:count=>{if(count>1&&failAttachment)throw Error('attachment_failed');},
+  approvalApi:{readApprovalState:()=>saved,beginApproval:options=>{begins.push(options);return saved=result;},pollApproval:()=>saved}});
  const id=randomUUID();await f.call(id);const old=f.installation.selected();
  const connectionFile=join(f.root,'replacement.json'),credentialId='enrolled-'+randomUUID();
  f.configs.set(connectionFile,{...f.configs.get(f.connectionFile),enrollment:{credentialId}});
@@ -325,4 +354,13 @@ test('approved but failed replacement attachment is not reported as connected ev
  assert.equal(status.state,'attention_required');assert.equal(status.connected,true);
  assert.equal(status.request_connection_state,'approved_not_connected');assert.equal(status.requestId,result.requestId);
  assert.deepEqual(f.installation.selected(),old);
+ assert.equal(f.sessions[0].closes.length,0);
+ failAttachment=false;
+ await f.call(id,'broker_setup',{broker_url:'https://broker.example'});
+ await new Promise(resolve=>setImmediate(resolve));const recovered=await f.call(id);
+ assert.equal(recovered.request_connection_state,'connected');assert.equal(recovered.requestId,result.requestId);
+ assert.equal(recovered.waiter_command,waiterCommand(f.server.directory));
+ assert.equal(begins.length,2);assert.equal(begins[1].replaceRequestId,undefined);
+ assert.equal(f.installation.selected().requestId,result.requestId);
+ assert.equal(f.sessions[0].closes.length,1);
 });
