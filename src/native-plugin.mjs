@@ -35,7 +35,7 @@ export function readPrivateJson(path) {
 function save(path,data) { const tmp=`${path}.${randomUUID()}.tmp`;writeFileSync(tmp,JSON.stringify(data),{mode:0o600,flag:'wx'});renameSync(tmp,path); }
 const shape=properties=>({type:'object',properties,required:[],additionalProperties:false});
 export const NATIVE_DEFINITIONS=[
- {name:'broker_setup',description:'Explicit setup or user-confirmed reauthorization: provide only broker_url, using broker_setup_status.broker_url when configured. Reuses a pending candidate; replacement is selected only after approval and attachment. Never revokes old access. No replace argument, secrets or automatic enrollment.',inputSchema:{...shape({broker_url:{type:'string',maxLength:2048}}),required:['broker_url']}},
+ {name:'broker_setup',description:'Explicit setup or user-confirmed reauthorization: provide only broker_url. Reauthorization requires /psst-reauthorize <https://broker.example>; never fill a missing argument from status. Configured-broker mismatches are rejected before setup changes. Reuses a pending candidate; replacement is selected only after approval and attachment. Never revokes old access. No replace argument, secrets or automatic enrollment.',inputSchema:{...shape({broker_url:{type:'string',maxLength:2048}}),required:['broker_url']}},
  {name:'broker_setup_status',description:'Show public broker_url, setup/approval state, request_connection_state and running connector package version; never exposes credentials or creates a request. Version is not native-host or delivery certification.',inputSchema:shape({})},
  {name:'broker_cancel_setup',description:'Cancel local pending setup/resume, keeping existing approved authorization.',inputSchema:shape({})},
  {name:'broker_connect',description:'Explicitly connect this native conversation using a PRIVATE pairing_file path or connection_file path, never secret text. Experimental native wakeup is not certified.',inputSchema:shape({pairing_file:{type:'string',maxLength:4096},connection_file:{type:'string',maxLength:4096}})},
@@ -174,7 +174,19 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
   async function execute(def,verified,context){
     if(closed||!isHostAlive())throw Error('native_host_unavailable');
     if(!session&&!['broker_setup','broker_setup_status','broker_connect','broker_disconnect','broker_cancel_setup'].includes(def.name))await tick();
-    if(def.name==='broker_setup'){const wasRecoveryBlocked=recoveryBlocked;try{const status=await manager.begin(verified.args.broker_url);return {...status,waiter_command:approvalWaiterCommand(directory),automatic_delivery_certified:false};}catch(error){if(wasRecoveryBlocked)recoveryBlocked=true;throw error;}}
+    if(def.name==='broker_setup'){
+      const wasRecoveryBlocked=recoveryBlocked;
+      try{const status=await manager.begin(verified.args.broker_url);return {...status,waiter_command:approvalWaiterCommand(directory),automatic_delivery_certified:false};}
+      catch(error){
+        if(wasRecoveryBlocked)recoveryBlocked=true;
+        if(['https_broker_url_required','broker_endpoint_mismatch'].includes(error.message)){
+          const rejected=new LocalError(error.message);
+          rejected.message=error.message==='broker_endpoint_mismatch'?'broker_endpoint_mismatch: The supplied endpoint differs from the configured broker; broker switching is not supported.':'https_broker_url_required: Provide an explicit HTTPS broker origin. Usage: /psst-reauthorize <https://broker.example>';
+          throw rejected;
+        }
+        throw error;
+      }
+    }
     if(def.name==='broker_setup_status'){await tick();const waiting=['pending','reconnecting'].includes(manager.status.state);const pending=installation.pending(),selected=installation.selected();const brokerUrl=pending&&!pending.cancelled?pending.brokerUrl:selected?.brokerUrl??pending?.brokerUrl;return {...manager.status,broker_url:brokerUrl??null,request_connection_state:manager.status.state==='approved'&&session?'connected':manager.status.approval_state==='approved'?'approved_not_connected':manager.status.state==='pending'?'pending':'not_connected',connector_runtime:CONNECTOR_RUNTIME,connected:Boolean(session),mode:'automatic_required',readiness:session?'native_wakeup_acceptance_unverified':reconnectAt?'reconnecting':'not_connected',...(reconnectAt?{retry_after_ms:Math.max(0,reconnectAt-now())}:{}),...(waiting?{waiter_command:approvalWaiterCommand(directory)}:session?{waiter_command:waiterCommand(directory)}:{})};}
     if(def.name==='broker_cancel_setup'){approvalResumed=true;installation.suppressSetup(verified.conversationId,true);return manager.cancel();}
     if(def.name==='broker_connect') {
@@ -241,7 +253,7 @@ export async function serveNativePlugin({base=nativeBase(),host=processIdentity(
     return admitted.result;
   };
   const stdio=serveStdio({input,output,tools,nativeTransportMetadata:true,readableNativeReceive:true,maxReceiveResponseBytes:NATIVE_RECEIVE_RESPONSE_BYTES,definitions:NATIVE_DEFINITIONS,onClose:close,
-    instructions:'Psst native automatic waiter delivery. Saved approval reconnects only after native binding. Use /psst-reauthorize for explicit replacement, /psst-setup for initial setup. Both use broker_setup with only broker_url, reusing a supplied or configured URL and retaining only necessary security confirmation; approval happens in the broker UI. Reauthorization is not reconnect or revocation; manual admin revocation is separate. The native hook supplies __psst_permit. After connection, run waiter_command with native run_command WaitMsBeforeAsync=500 and end the turn. For an agent-message notice, receive, read, acknowledge message_id, drain FIFO and re-arm. For a transport notice, read broker_presence_events, explicitly acknowledge only the event_id read using broker_acknowledge_presence_event, drain batches and re-arm; never treat it as an agent message or auto-resend/cancel/close. Retry and receipt keys stay internal. This wakeup route still requires native acceptance verification. ' + DIRECT_COMMAND_GUIDANCE + ' ' + PEER_GUIDANCE});
+    instructions:'Psst native automatic waiter delivery. Saved approval reconnects only after native binding. Use /psst-reauthorize <https://broker.example> for explicit replacement; return usage immediately for missing or malformed endpoints, and reject configured-broker mismatches. Use /psst-setup for initial setup, which may reuse a supplied or configured URL. Both use broker_setup with only broker_url and retain necessary security confirmation; approval happens in the broker UI. Reauthorization is not reconnect or revocation; manual admin revocation is separate. The native hook supplies __psst_permit. After connection, run waiter_command with native run_command WaitMsBeforeAsync=500 and end the turn. For an agent-message notice, receive, read, acknowledge message_id, drain FIFO and re-arm. For a transport notice, read broker_presence_events, explicitly acknowledge only the event_id read using broker_acknowledge_presence_event, drain batches and re-arm; never treat it as an agent message or auto-resend/cancel/close. Retry and receipt keys stay internal. This wakeup route still requires native acceptance verification. ' + DIRECT_COMMAND_GUIDANCE + ' ' + PEER_GUIDANCE});
   const abort=()=>{void stdio.close();};signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   return {directory,binding,tools,done:stdio.done,async close(){signal?.removeEventListener('abort',abort);await stdio.close();}};
 }

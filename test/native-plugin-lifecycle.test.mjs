@@ -48,7 +48,7 @@ async function fixture(t, { failure, selected = true, approvalApi } = {}) {
   });
   const call = (id, name = 'broker_setup_status', args = {}) => server.tools[name](
     server.binding.issue({ context: { host, conversationId: id }, tool: name, args }), { nativeMeta: nativeMeta(id) });
-  return { root, server, input, output, installation, connectionFile, requestId, credentialId, configs, calls, sessions, call,
+  return { root, server, host, input, output, installation, connectionFile, requestId, credentialId, configs, calls, sessions, call,
     advance: milliseconds => { time += milliseconds; } };
 }
 
@@ -193,6 +193,38 @@ test('late successful startup cannot replace or publish over a newer approved se
   assert.deepEqual(f.sessions[1].closes, [{ closeSession: false }]);
 });
 
+test('native MCP dispatch fences invalid targets before setup changes and reaches the matching target', async t => {
+ let reads=0,posts=0;const requestId=randomUUID();
+ const f=await fixture(t,{approvalApi:{readApprovalState:()=>{reads++;return null;},beginApproval:()=>{posts++;return {state:'denied',requestId};}}});
+ const id=randomUUID();await f.call(id);
+ const selected=f.installation.selected(),pending=f.installation.pending();
+ let rpcId=0;
+ const rpc=(method,params)=>{
+  const response=new Promise(resolve=>f.output.once('data',bytes=>resolve(JSON.parse(bytes.toString()))));
+  f.input.write(JSON.stringify({jsonrpc:'2.0',id:++rpcId,method,params})+'\n');return response;
+ };
+ await rpc('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'fixture',version:'1'}});
+ f.input.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');
+ for(const broker_url of [undefined,'https:broker.example','http://broker.example','https://broker.example/path','https://other.example']){
+  const args=broker_url===undefined?{}:{broker_url};
+  const response=await rpc('tools/call',{name:'broker_setup',arguments:f.server.binding.issue({context:{host:f.host,conversationId:id},tool:'broker_setup',args}),_meta:nativeMeta(id)});
+  if(broker_url===undefined)assert.equal(response.error.code,-32602);
+  else{
+   assert.equal(response.result.isError,true);
+   const error=JSON.parse(response.result.content[0].text).error;
+   assert.equal(error.code,broker_url==='https://other.example'?'broker_endpoint_mismatch':'https_broker_url_required');
+   assert.equal(error.effect,'not_applied');
+   assert.match(error.message,broker_url==='https://other.example'?/differs from the configured broker/:/Usage: \/psst-reauthorize/);
+  }
+  assert.equal(reads,0);assert.equal(posts,0);
+  assert.deepEqual(f.installation.selected(),selected);assert.deepEqual(f.installation.pending(),pending);
+ }
+ const args={broker_url:'https://BROKER.EXAMPLE:443/'};
+ const response=await rpc('tools/call',{name:'broker_setup',arguments:f.server.binding.issue({context:{host:f.host,conversationId:id},tool:'broker_setup',args}),_meta:nativeMeta(id)});
+ assert.equal(response.result.isError,false);assert.equal(reads,1);assert.equal(posts,1);
+ assert.equal(f.installation.pending().requestId,requestId);assert.deepEqual(f.installation.selected(),selected);
+});
+
 test('invalid setup or failed initial read cannot cancel a valid saved startup', async t => {
  for(const initialReadFails of [false,true]){
   const entered=barrier(),finish=barrier();
@@ -206,12 +238,16 @@ test('invalid setup or failed initial read cannot cancel a valid saved startup',
  }
 });
 
-test('invalid setup leaves an explicitly disconnected conversation disabled', async t => {
+test('invalid or mismatched setup leaves an explicitly disconnected conversation and its selection unchanged', async t => {
  const f=await fixture(t),id=randomUUID();await f.call(id);await f.call(id,'broker_disconnect');
- await assert.rejects(f.call(id,'broker_setup',{broker_url:'not a URL'}),/https_broker_url_required/);
+ const selected=f.installation.selected(),pending=f.installation.pending();
+ for(const broker_url of [undefined,'not a URL','https://other.example']){
+  await assert.rejects(f.call(id,'broker_setup',broker_url===undefined?{}:{broker_url}),broker_url==='https://other.example'?/broker_endpoint_mismatch/:/https_broker_url_required/);
+  assert.deepEqual(f.installation.selected(),selected);assert.deepEqual(f.installation.pending(),pending);
+  assert.equal(f.installation.sessionDisabled(id),true);assert.equal(f.installation.setupSuppressed(id),true);
+ }
  f.advance(600000);const status=await f.call(id);
  assert.equal(status.connected,false);assert.equal(status.waiter_command,undefined);assert.equal(f.calls.length,1);
- assert.equal(f.installation.sessionDisabled(id),true);
 });
 
 test('reauthorization exposes only public origin and distinguishes pending replacement from old transport', async t => {

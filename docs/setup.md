@@ -213,10 +213,9 @@ Runtime capability and permission limits described above remain in force.
 
 ## Explicit replacement authorization
 
-Invoke `/psst-reauthorize` → confirm the displayed HTTPS broker origin → receive
-one public request ID → approve it in Psst admin → wait for connection. The skill
-reads `broker_setup_status.broker_url` to reuse the configured origin and calls
-`broker_setup` with only `broker_url`; it never invents a `replace` argument.
+Invoke `/psst-reauthorize <https://broker.example>` with exactly one explicit HTTPS broker origin → confirm that origin → receive one public request ID → approve it in Psst admin → wait for connection. Missing or malformed input returns `Usage: /psst-reauthorize <https://broker.example>` as the skill's first step, without tool calls, conversational follow-up or enrollment. The endpoint must have no credentials, non-root path, query, fragment, backslash or whitespace. Saved configuration does not replace the required argument.
+
+After validating input and required tool availability, the skill reads `broker_setup_status.broker_url` only to compare the target. A different configured broker returns `broker_endpoint_mismatch`; it never silently substitutes another destination. The shared approval manager also rejects target mismatches before helper access or setup-state changes, preserving pending requests, cancellation, selection and unread journals. Equivalent HTTPS origins (host case, default port and trailing slash) are accepted. Initial setup without a configured broker still uses the existing path; this does not introduce broker switching. The skill calls `broker_setup` with only `broker_url`, never a `replace` argument. The existing origin confirmation remains in this endpoint-validation slice.
 
 `request_connection_state` distinguishes `pending`, `approved_not_connected`,
 `connected` and `not_connected`. Approval can succeed before attachment succeeds.
@@ -243,16 +242,9 @@ manual revocation is separate.
 
 ### Model-driven slash dispatch and owner decision
 
-This candidate exposes a **prompt-based skill**, not token-free native dispatch.
-The documented CLI skill contract converts a skill to `/<skill-name>` and has the
-agent follow its instructions. It does not expose a plugin slash callback. The
-current web hook reference also describes `PreInvocation.terminationBehavior`
-with injected tools, which is a possible newer-host route, not a verified
-capability of the supported CLI 1.4.7. Its inspected hook schema contains only
-`injectSteps` for `PreInvocationHookResult`, whereas `PostInvocationHookResult`
-contains `terminationBehavior`; terminating after invocation already spends a
-model turn. Hook injection is not evidence of model-free execution or of a safe
-confirmation/result/waiter lifecycle.
+This candidate exposes a **prompt-based skill**, not token-free native dispatch. The documented skill contract exposes a skill as `/<skill-name>` and has the agent follow its instructions. It does not expose a plugin slash callback. The endpoint requirement is shown in the skill description and usage text, using documented `name`/`description` metadata rather than inventing an argument-validation field. Invalid command arguments therefore fail at the first skill gate, not deterministically before a model turn.
+
+The current web hook reference describes `PreInvocation.terminationBehavior` with injected messages, which is a possible newer-host route, not a verified capability of the supported CLI 1.4.7. The repository's previously inspected CLI schema contained only `injectSteps` for `PreInvocationHookResult`, whereas `PostInvocationHookResult` contained `terminationBehavior`; terminating after invocation already spends a model turn. No native host is available on this environment's PATH to verify newer support. Hook injection is not evidence of model-free execution or of a safe confirmation/result/waiter lifecycle.
 
 On 2026-11-04 the owner explicitly accepted a model-driven slash command for
 issue #29 because it simplifies use. Token-free execution is not claimed. Do not
@@ -261,6 +253,4 @@ wrapper, permission bypass, extra MCP server or direct credential access as a
 substitute. A newer supported-host route needs its exact dispatch/termination,
 normal confirmation, ownership and completion behavior established first.
 
-Sources checked 2026-11-04: [skills and slash conversion](https://antigravity.google/docs/skills),
-[plugin components](https://antigravity.google/docs/build-plugins/), and
-[PreInvocation contract](https://antigravity.google/docs/hooks#preinvocation).
+Sources rechecked 2026-11-05 (web documentation, not installed-host certification): [skills and slash conversion](https://antigravity.google/docs/skills), [plugin components](https://antigravity.google/docs/build-plugins/), and [PreInvocation contract](https://antigravity.google/docs/hooks#preinvocation).
