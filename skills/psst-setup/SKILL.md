@@ -17,7 +17,7 @@ arm the returned inbox waiter as described by the psst skill. Terminal denial,
 expiry, cancellation or error needs explicit intervention, not repeated setup.
 
 For replacement use /psst-reauthorize <https://broker.example> with an explicit HTTPS endpoint, not another initial-setup explanation.
-It reuses broker_setup with broker_url only, after target confirmation. Working
+The explicit command supplies replacement intent; it reuses broker_setup with broker_url only, without another agent confirmation. Working
 approved authorization stays active while possible during replacement setup.
 Requesting replacement does not revoke old access; manual admin revocation is separate.
 No request or key may be created on ordinary startup. Credentials are stored

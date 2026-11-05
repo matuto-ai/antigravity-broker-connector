@@ -59,17 +59,19 @@ test('only initial setup can fill a missing endpoint from public status', () => 
   assert.match(setup, /Usage: \/psst-setup <https:\/\/broker.example>.*before tool calls/);
   assert.match(replace, /Never supply the missing argument from saved configuration/);
   assert.ok(replace.indexOf('First validate the argument') < replace.indexOf('broker_setup_status'));
-  assert.match(replace, /already been satisfied for this same operation and origin/);
+  assert.match(replace, /valid explicit human invocation supplies replacement intent/);
 });
 test('direct intent does not bypass a native permit denial or overwrite tool arguments', () => {
-  const input = { toolCall: { name: 'call_mcp_tool', args: {
-    ServerName: NATIVE_SERVER, ToolName: 'broker_send',
-    Arguments: { recipient_id: '11111111-1111-4111-8111-111111111111', text: 'pong' },
-  } } };
-  const before = structuredClone(input);
-  const result = hookDecision({ input, directory: '/unit/native', binding: { issue() { throw Error('denied'); } } });
-  assert.equal(result.decision, 'deny');
-  assert.equal(result.overwrite, undefined);
-  assert.equal(result.permissionOverrides, undefined);
-  assert.deepEqual(input, before);
+  for (const [ToolName, Arguments] of [
+    ['broker_send', { recipient_id: '11111111-1111-4111-8111-111111111111', text: 'pong' }],
+    ['broker_setup', { broker_url: 'https://broker.example' }],
+  ]) {
+    const input = { toolCall: { name: 'call_mcp_tool', args: { ServerName: NATIVE_SERVER, ToolName, Arguments } } };
+    const before = structuredClone(input);
+    const result = hookDecision({ input, directory: '/unit/native', binding: { issue() { throw Error('denied'); } } });
+    assert.equal(result.decision, 'deny');
+    assert.equal(result.overwrite, undefined);
+    assert.equal(result.permissionOverrides, undefined);
+    assert.deepEqual(input, before);
+  }
 });
