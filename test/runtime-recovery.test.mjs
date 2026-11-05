@@ -110,6 +110,13 @@ test('manual pauses, permanent protocol/security/storage errors and stopped life
   await f.runtime.stop(); const count = f.calls.length; await f.time.advance(600000); assert.equal(f.calls.length, count);
 });
 
+test('sender-only lease recovery does not wait forever for a disabled mailbox poll', async t => {
+  const f = await fixture(t); f.runtime.receiveEnabled = false; f.client.stale = true;
+  await f.time.advance(60000);
+  assert.equal(f.runtime.status().reception, 'disabled'); assert.equal(f.runtime.status().recovery, 'idle');
+  assert.equal(f.runtime.status().error_code, null); assert.equal(f.client.attachment.lease_epoch, 2);
+});
+
 test('a successful mailbox response is not allowed to disguise a malformed value as an empty poll', async t => {
   for (const value of [false, 0, '', {}, { claim_id: randomUUID() }]) {
     const f = await fixture(t); f.poll().resolve(value); await flush();

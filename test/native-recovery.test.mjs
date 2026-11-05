@@ -107,7 +107,7 @@ test('native lifetime survives outage, stale heartbeat and ambiguous completion 
   assert.equal(f.unavailable.length,0);assert.deepEqual(f.session.identity,identity);
   const envelope=f.queue();f.returnBroker();
   for(let i=0;i<20&&!f.completed;i++)await f.advance();
-  await until(()=>f.completed);
+  await until(()=>f.completed&&f.session.transportStatus().reception==='healthy');
   assert.equal(registrationCount(),2,'stale heartbeat reconciles the owned session exactly once');
   assert.equal(f.session.inbox.directory,directory);assert.deepEqual(f.session.identity,identity);
   assert.deepEqual(f.session.inbox.outgoing(sendKey),originalSend,'reception recovery preserves uncertain outgoing intent and key');
@@ -124,7 +124,7 @@ test('native lifetime survives outage, stale heartbeat and ambiguous completion 
 test('a receive-only interruption recovers in the same native lifetime while heartbeat stays available',async t=>{
   const f=await fixture(t);f.queue();f.failReceiver();
   for(let i=0;i<12&&!f.completed;i++)await f.advance();
-  await until(()=>f.completed);
+  await until(()=>f.completed&&f.session.transportStatus().reception==='healthy');
   assert.equal(f.requests.filter(r=>r.path==='/v1/sessions').length,1);
   assert.equal(f.session.transportStatus().reception,'healthy');assert.equal(f.unavailable.length,0);
 });
