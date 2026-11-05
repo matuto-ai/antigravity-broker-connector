@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, cpSync, mkdirSync, readFileSync, writeFileSync, re
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { inspectNativeInstallation, supportedNativeRuntime, nativeInstallationError, NATIVE_RUNTIME_FILES } from '../src/native-installation.mjs';
 const source = fileURLToPath(new URL('../', import.meta.url));
 function fixture(t) {
@@ -113,14 +114,32 @@ test('doctor rejects every missing native runtime dependency before suggesting i
   assert.throws(() => inspectNativeInstallation(f.pkg, { home: f.root }), /native_plugin_package_invalid/);
 });
 
-test('doctor rejects a package missing either lifecycle command skill', t => {
+test('doctor rejects a package missing any lifecycle or diagnostic command skill', t => {
   const f = fixture(t);
-  for (const name of ['psst-connect', 'psst-disconnect']) {
+  for (const name of ['psst-connect', 'psst-disconnect', 'psst-status', 'psst-cancel-setup', 'psst-doctor']) {
     const path = join(f.pkg, 'skills', name, 'SKILL.md'), content = readFileSync(path);
     rmSync(path);
     assert.throws(() => inspectNativeInstallation(f.pkg, { home: f.root }), /native_plugin_package_invalid/);
     writeFileSync(path, content);
   }
+});
+
+test('doctor CLI inspects its own package without MCP, broker setup or filesystem writes', t => {
+  const f = fixture(t), bin = join(source, 'bin/psst-antigravity.mjs');
+  const before = readdirSync(f.root, { recursive: true }).sort();
+  const result = spawnSync(process.execPath, [bin, 'doctor'], {
+    env: { ...process.env, HOME: f.root, PATH: '/not-a-path' }, encoding: 'utf8', timeout: 10000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.package_shape, 'verified');
+  assert.equal(report.runtime.node, process.versions.node);
+  assert.equal(report.launcher.status, 'not_found_on_path');
+  assert.equal(report.native_connection, 'not_checked');
+  assert.equal(report.owner_lock, 'not_checked');
+  assert.equal(report.import_permission, 'not_checked');
+  assert.equal(report.native_installation, 'registration_or_package_absent');
+  assert.deepEqual(readdirSync(f.root, { recursive: true }).sort(), before);
 });
 
 test('doctor rejects disabled, missing or modified hooks and additional MCP commands', t => {

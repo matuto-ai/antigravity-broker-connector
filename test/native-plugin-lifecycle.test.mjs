@@ -239,6 +239,74 @@ test('explicit connect retains private-file validation and cannot replace a work
   assert.equal(f.sessions[0].closes.length, 0);
 });
 
+test('status reports exact client identity and distinguishes explicit disconnect from missing setup', async t => {
+  const f = await fixture(t), id = randomUUID();
+  const selected = f.installation.selected(), pending = f.installation.pending();
+  const status = await f.call(id);
+  assert.equal(status.connected, true);
+  assert.equal(status.disconnected, false);
+  assert.equal(status.client_id, f.sessions[0].identity.client_id);
+  assert.equal(typeof status.connector_runtime.version, 'string');
+  assert.equal(status.automatic_delivery_certified, false);
+  await f.call(id, 'broker_disconnect');
+  const disconnected = await f.call(id);
+  assert.equal(disconnected.disconnected, true);
+  assert.equal(disconnected.client_id, null);
+  assert.equal(disconnected.connected, false);
+  assert.equal(disconnected.waiter_command, undefined);
+  assert.deepEqual(f.installation.selected(), selected);
+  assert.deepEqual(f.installation.pending(), pending);
+  const missing = await fixture(t, { selected: false });
+  const unconfigured = await missing.call(randomUUID());
+  assert.equal(unconfigured.disconnected, false);
+  assert.equal(unconfigured.client_id, null);
+  assert.equal(unconfigured.state, 'setup_needed');
+  assert.equal(missing.installation.pending(), null);
+});
+
+test('cancel setup retains working transport and fences late approved attachment', async t => {
+  const entered = barrier(), finish = barrier(), requestId = randomUUID();
+  let result;
+  const f = await fixture(t, { failure: async count => { if (count === 2) { entered.resolve(); await finish.promise; } },
+    approvalApi: { readApprovalState: () => null, beginApproval: () => result, pollApproval: () => result } });
+  const id = randomUUID();
+  await f.call(id);
+  const selected = f.installation.selected(), identity = f.sessions[0].identity.client_id;
+  const connectionFile = join(f.root, 'replacement.json'), credentialId = 'enrolled-' + randomUUID();
+  f.configs.set(connectionFile, { ...f.configs.get(f.connectionFile), enrollment: { credentialId } });
+  result = { state: 'approved', requestId, connectionFile, credentialId };
+  await f.call(id, 'broker_setup', { broker_url: 'https://broker.example' });
+  await entered.promise;
+  const pending = f.installation.pending();
+  const cancelled = await f.call(id, 'broker_cancel_setup');
+  finish.resolve();
+  assert.equal(cancelled.state, 'cancelled');
+  assert.equal(cancelled.connected, true);
+  assert.equal(cancelled.waiter_command, waiterCommand(f.server.directory));
+  await new Promise(resolve => setImmediate(resolve));
+  const status = await f.call(id);
+  assert.equal(status.connected, true);
+  assert.equal(status.disconnected, false);
+  assert.equal(status.client_id, identity);
+  assert.equal(status.waiter_command, waiterCommand(f.server.directory));
+  assert.deepEqual(f.installation.selected(), selected);
+  assert.deepEqual(f.installation.pending(), pending);
+  assert.equal(f.installation.setupSuppressed(id), true);
+  assert.equal(f.installation.sessionDisabled(id), false);
+  assert.equal(f.sessions[0].closes.length, 0);
+  assert.equal(f.sessions[1].closes.length, 1);
+});
+
+test('cancel setup without a connection does not return or arm an inbox waiter', async t => {
+  const f = await fixture(t, { selected: false }), id = randomUUID();
+  const cancelled = await f.call(id, 'broker_cancel_setup');
+  assert.equal(cancelled.state, 'cancelled');
+  assert.equal(cancelled.connected, false);
+  assert.equal(cancelled.waiter_command, undefined);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.installation.pending(), null);
+});
+
 test('missing installation stays setup-needed and never calls the native session factory', async t => {
   const f = await fixture(t, { selected: false });
   const id = randomUUID(); assert.equal((await f.call(id)).state, 'setup_needed');

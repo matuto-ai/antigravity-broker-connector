@@ -51,7 +51,7 @@ enabled state, version and installation path. `agy` is the official command name
 finding it on PATH does not establish a separate custom wrapper. The default
 doctor does not run either manager or claim import permission from a listing.
 
-After the supported restart, `broker_setup_status` reports
+After the supported restart, `/psst-status` calls `broker_setup_status` once and reports
 `connector_runtime.name` and `connector_runtime.version` from the executing MCP
 package's startup metadata. Compare that version with the intended update. An
 already-running process retains its startup version when files on disk change;
@@ -93,12 +93,21 @@ connection is still active, so its completion can re-arm the new inbox.
 | `/psst-setup <https://broker.example>` | Initial URL-only setup and administrator approval. |
 | `/psst-connect` | Reconnect this conversation using saved authorization; no arguments or enrollment. Already connected is a no-op. |
 | `/psst-disconnect` | Stop this conversation's transport, waiter and pending setup resumption; preserve saved authorization and unread messages. |
+| `/psst-status` | Show setup/connection state, explicit disconnect, exact client ID and running connector version. |
+| `/psst-cancel-setup` | Pause setup/late attachment only; retain any working transport, authorization and unread messages. |
+| `/psst-doctor` | Read-only package/runtime/launcher/managed-registration inspection through the installed CLI. |
 | `/psst-reauthorize <https://broker.example>` | Explicit replacement authorization at the required endpoint; not reconnect or revocation. |
 | `/psst` | Recipient discovery and messaging. |
 
 Connect calls `broker_connect` with no arguments on `psst-native_psst`, then arms the returned waiter with native `run_command`, `WaitMsBeforeAsync=500`. Missing saved authorization directs you to setup; invalid, expired or revoked authorization stops for attention without enrollment or automatic replacement. Explicit legacy `connection_file` or `pairing_file` tool arguments remain supported; file contents stay private. Disconnect calls `broker_disconnect` with no arguments and does not re-arm a waiter. It remains in force across reload for this conversation until explicit connect or setup, without disabling other conversations.
 
-Both commands are packaged prompt-based skills, not token-free native callbacks. They retain the native permission and one-use conversation-binding checks.
+Status calls `broker_setup_status` once without a polling loop. It reports `connected` separately from `state` and `request_connection_state`, plus `disconnected`, nullable `client_id`, `connector_runtime.version` and readiness. A pending replacement or cancelled setup can coexist with working transport. An explicit disconnect never becomes an automatic connect merely because status was requested. Status may observe existing saved-authorization recovery, but never creates enrollment or replacement authorization.
+
+Cancel-setup calls `broker_cancel_setup` once. It suppresses this conversation's setup resumption and late attachment without deleting the durable request or disconnecting existing transport. When a connection is retained, the result returns its inbox waiter; the skill arms it once with native `run_command`, not the cancelled approval waiter. Without a connection there is no waiter to arm. Explicit `/psst-setup` can resume the request later; cancellation cannot undo a request already submitted to the broker or revoke credentials.
+
+Doctor runs exactly `psst-antigravity doctor` using native `run_command` under normal permissions. The reviewed CLI must be on PATH in the same environment; a missing executable is an actionable blocker, not permission to guess paths, install packages or launch another host. Doctor needs no Psst MCP tools and can run while disconnected or when MCP is missing. Its scope is package completeness/version, Linux/Node runtime, agy launcher presence and managed registration. It neither opens credential/config bodies or inbox databases nor probes the network, executes agy, modifies permissions/locks/state or tests connection/wakeup. It is not Pi's storage-path doctor. Preserve `not_checked`/`not_verified` results as unknown, and perform any suggested native `/plugin` action separately.
+
+All commands are packaged prompt-based skills, not token-free native callbacks. MCP operations retain the one-use conversation-binding checks; shell doctor retains normal native execution permissions.
 
 Explicit setup and messaging commands execute through the supported native tools without another execution question or preventive diagnostics. The native server supplies shared command guidance; skills first check only the required inputs and capabilities. Setup needs `broker_setup` on `psst-native_psst` and native `run_command` for its waiter; `broker_setup_status` is needed only when no URL was supplied. A supplied invalid broker origin returns usage before tool calls. Messaging checks its requested tool and required arguments, using supplied exact recipient IDs or normal recipient discovery. Missing input gets one focused question; missing capability gets its name and the next step to enable the native plugin/tool, then stops.
 
