@@ -3,6 +3,36 @@ import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import
 import {randomUUID} from 'node:crypto';import {openInstallation} from '../src/installation.mjs';import {createApprovalManager} from '../src/approval-manager.mjs';
 function fixture(t){const root=mkdtempSync(join(tmpdir(),'agy-approval-'));t.after(()=>rmSync(root,{recursive:true,force:true}));const configs=new Map();const installation=openInstallation(root,path=>{if(!configs.has(path))throw Error('invalid_config');return configs.get(path);});return{root,configs,installation};}
 function approved(f,requestId=randomUUID()){const connectionFile=join(f.root,requestId+'.json'),credentialId='enrolled-'+randomUUID();f.configs.set(connectionFile,{brokerUrl:'https://broker.example',enrollment:{credentialId}});return{state:'approved',requestId,connectionFile,credentialId};}
+test('rejected endpoints preserve selected, pending and cancelled state without helper access',async t=>{
+ const invalid=[undefined,null,'','http://broker.example','https:broker.example','https:///broker.example','https://@broker.example','https://user@broker.example','https://broker.example/path','https://broker.example?','https://broker.example#','https://broker.example\\\\','https://broker.example\n','https://broker.example:bad'];
+ for(const state of ['empty','selected','pending','cancelled','terminal']){
+  const f=fixture(t),first=approved(f);
+  if(state!=='empty')f.installation.beginPending({brokerUrl:'https://broker.example',requestId:first.requestId,previousRevision:null});
+  if(state==='selected')f.installation.commit({...first,previousRevision:null});
+  if(state==='terminal')f.installation.cancel({requestId:first.requestId,state:'denied'});
+  const publications=[];
+  const manager=createApprovalManager({installation:f.installation,api:{readApprovalState:()=>assert.fail('rejected input must not access helper'),beginApproval:()=>assert.fail('rejected input must not enroll')},activate:{},onBegin:()=>assert.fail('rejected input must not begin'),onStatus:status=>publications.push(status)});
+  if(state==='cancelled')manager.cancel();
+  const before={selected:f.installation.selected(),pending:f.installation.pending(),status:manager.status},published=publications.length;
+  for(const method of ['beginPending','commit','cancel'])f.installation[method]=()=>assert.fail('rejected input must not mutate '+method);
+  for(const endpoint of [...invalid,...(state==='empty'?[]:['https://other.example','https://broker.example:444'])]){
+   await assert.rejects(manager.begin(endpoint),invalid.includes(endpoint)?/https_broker_url_required/:/broker_endpoint_mismatch/);
+   assert.deepEqual({selected:f.installation.selected(),pending:f.installation.pending(),status:manager.status},before);
+   assert.equal(publications.length,published);
+  }
+  manager.close();
+ }
+});
+test('equivalent explicit origins reach the existing replacement path',async t=>{
+ for(const endpoint of ['https://BROKER.EXAMPLE:443/','https://broker.example/']){
+  const f=fixture(t),first=approved(f),next=approved(f);let begins=0;
+  f.installation.beginPending({brokerUrl:'https://broker.example',requestId:first.requestId,previousRevision:null});
+  f.installation.commit({...first,previousRevision:null});
+  const manager=createApprovalManager({installation:f.installation,api:{readApprovalState:options=>{assert.equal(options.brokerUrl,'https://broker.example');return first;},beginApproval:options=>{begins++;assert.equal(options.brokerUrl,'https://broker.example');assert.equal(options.replaceRequestId,first.requestId);return next;}},activate:{prepare:async()=>({close:async()=>{}}),commit:async()=>{}}});
+  await manager.begin(endpoint);await manager.done;
+  assert.equal(begins,1);assert.equal(f.installation.selected().requestId,next.requestId);manager.close();
+ }
+});
 test('startup absent state never enrolls; URL setup persists intent before POST and selects only after attachment',async t=>{
  const f=fixture(t);let calls=0,prepared=0,committed=0;const result=approved(f);const api={readApprovalState:()=>null,beginApproval:async()=>{calls++;assert.equal(f.installation.pending().requestId,null);return result;},pollApproval:async()=>result};
  const m=createApprovalManager({installation:f.installation,api,activate:{prepare:async()=>{prepared++;assert.equal(f.installation.selected(),null);return{close:async()=>{}};},commit:async()=>{committed++;}}});
@@ -53,6 +83,20 @@ test('known expired pending request stops locally without GET, POST or implicit 
 });
 
 const barrier=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve};};
+test('rejected endpoints leave an active approval loop able to select its original candidate',async t=>{
+ const f=fixture(t),result=approved(f),paused=barrier(),release=barrier();let polls=0;
+ const manager=createApprovalManager({installation:f.installation,
+  api:{readApprovalState:()=>null,beginApproval:()=>({state:'pending',requestId:result.requestId}),pollApproval:()=>{polls++;return result;}},
+  activate:{prepare:async()=>({close:async()=>{}}),commit:async()=>{}},sleep:async()=>{paused.resolve();await release.promise;}});
+ t.after(()=>{manager.close();release.resolve();});
+ await manager.begin('https://broker.example');await paused.promise;
+ const pending=f.installation.pending(),status=manager.status;
+ await assert.rejects(manager.begin(),/https_broker_url_required/);
+ await assert.rejects(manager.begin('https://other.example'),/broker_endpoint_mismatch/);
+ assert.deepEqual(f.installation.pending(),pending);assert.deepEqual(manager.status,status);
+ release.resolve();await manager.done;
+ assert.equal(polls,1);assert.equal(f.installation.selected().requestId,result.requestId);
+});
 test('close during initial begin read prevents POST, intent writes and late status',async t=>{
  const f=fixture(t),read=barrier(),entered=barrier(),publications=[];let posts=0,writes=0;
  const beginPending=f.installation.beginPending;f.installation.beginPending=(...args)=>{writes++;return beginPending(...args);};

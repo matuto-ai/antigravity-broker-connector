@@ -6,12 +6,7 @@
 
 Install the packaged native plugin once through Antigravity's normal `/plugin`
 manager, then invoke `/psst-setup` and provide **only the broker HTTPS URL**.
-For replacement authorization invoke `/psst-reauthorize`, confirm the saved broker
-origin, and approve the displayed new request in Psst admin. This is a model-driven
-skill, not a token-free command. Replacement does not revoke old credentials.
-Approve the displayed request in the broker admin UI. Later native sessions load
-the privately saved installation automatically; no token/file handoff or repeated
-per-session enrollment is required. [Setup and exact persistence paths](docs/setup.md).
+For replacement authorization invoke `/psst-reauthorize <https://broker.example>` with an explicit HTTPS broker endpoint, confirm that origin, and approve the displayed new request in Psst admin. Missing or malformed endpoints return usage; a different configured broker is rejected before enrollment or setup changes. Saved configuration never supplies the missing argument. This is a model-driven skill, not a token-free command. Replacement does not revoke old credentials. Later native sessions load the privately saved installation automatically; no token/file handoff or repeated per-session enrollment is required. [Setup and exact persistence paths](docs/setup.md).
 
 For the short npm + native-manager route, use [Setup once](docs/setup.md).
 `psst-antigravity doctor` verifies the actual package root and prints the native

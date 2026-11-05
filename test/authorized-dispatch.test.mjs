@@ -29,7 +29,7 @@ for (const [name, guidance, ...requirements] of fixtures) {
 test('packaged skills and native waiter share collaboration guidance without grant gates', () => {
   for (const name of ['psst', 'psst-setup', 'psst-reauthorize']) {
     const skill = readFileSync(new URL('../skills/' + name + '/SKILL.md', import.meta.url), 'utf8');
-    assert.ok(skill.includes(DIRECT_COMMAND_GUIDANCE), name);
+    if (name !== 'psst-reauthorize') assert.ok(skill.includes(DIRECT_COMMAND_GUIDANCE), name);
     if (name === 'psst') assert.ok(skill.includes(PEER_GUIDANCE));
     else assert.match(skill, /For peer collaboration and receive\/read\/ACK\/re-arm behavior, follow the psst skill/);
     assert.doesNotMatch(skill, /ask only for the missing grant|within existing human authorization/);
@@ -46,12 +46,13 @@ test('generated experimental plugin delivers the shared peer and transport-notic
   assert.match(skill, /transport notice is not an agent message/);
   assert.match(skill, /broker_acknowledge_presence_event/);
 });
-test('setup and replacement use supplied URL first and only public status as fallback', () => {
+test('only initial setup can fill a missing endpoint from public status', () => {
   const setup = readFileSync(new URL('../skills/psst-setup/SKILL.md', import.meta.url), 'utf8');
   const replace = readFileSync(new URL('../skills/psst-reauthorize/SKILL.md', import.meta.url), 'utf8');
   assert.match(setup, /reuse the supplied HTTPS broker URL/);
   assert.match(setup, /broker_setup_status once and reuse its public broker_url/);
-  assert.match(replace, /Reuse the explicitly supplied HTTPS broker origin/);
+  assert.match(replace, /Never supply the missing argument from saved configuration/);
+  assert.ok(replace.indexOf('First validate the argument') < replace.indexOf('broker_setup_status'));
   assert.match(replace, /already been satisfied for this same operation and origin/);
 });
 test('direct intent does not bypass a native permit denial or overwrite tool arguments', () => {

@@ -1,6 +1,11 @@
 // URL-only setup: explicit begin is the only operation allowed to POST/create.
 import { setTimeout as delay } from 'node:timers/promises';
-const origin=value=>{let u;try{u=new URL(value);}catch{throw Error('https_broker_url_required');}if(typeof value!=='string'||u.protocol!=='https:'||u.username||u.password||u.search||u.hash||u.pathname!=='/'||/[\s\u0000-\u001f]/u.test(value))throw Error('https_broker_url_required');return u.origin;};
+const origin=value=>{
+ if(typeof value!=='string'||!/^https:\/\/[^/?#@\\\s]+\/?$/iu.test(value)||/[\u0000-\u001f\u007f]/u.test(value))throw Error('https_broker_url_required');
+ let u;try{u=new URL(value);}catch{throw Error('https_broker_url_required');}
+ if(u.protocol!=='https:'||u.username||u.password||u.search||u.hash||u.pathname!=='/')throw Error('https_broker_url_required');
+ return u.origin;
+};
 export function createApprovalManager({installation,api,activate,isAlive=()=>true,onStatus=()=>{},onBegin=()=>{},pollMs=2000,sleep=delay}){
  if(pollMs<2000)throw Error('approval_poll_too_fast');
  let generation=0,controller,busy=false,closed=false,status={state:'setup_needed'};
@@ -49,6 +54,9 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
    if(busy)throw Error('setup_in_progress');busy=true;
    try{
     brokerUrl=origin(brokerUrl);const old=installation.selected(),prior=installation.pending();
+    const configured=old?.brokerUrl??prior?.brokerUrl;
+    if(configured&&brokerUrl!==origin(configured))throw Error('broker_endpoint_mismatch');
+    if(prior&&!prior.cancelled&&prior.brokerUrl!==brokerUrl)throw Error('cancel_pending_setup_first');
     const existing=await api.readApprovalState({brokerUrl,directory:installation.directory,clientType:'antigravity-cli'});
     if(!alive()||generation!==startedGeneration)return status;
     // An approved candidate that has not been selected is still the same delivery.
@@ -57,7 +65,6 @@ export function createApprovalManager({installation,api,activate,isAlive=()=>tru
       &&(prior.requestId===existing.requestId
         ||(prior.requestId===null&&(existing.parentRequestId??null)===(prior.replacesRequestId??null)));
     const replacing=existing&&existing.state!=='pending'&&!attaching;
-    if(prior&&!prior.cancelled&&prior.brokerUrl!==brokerUrl)throw Error('cancel_pending_setup_first');
     const p=installation.beginPending({brokerUrl,previousRevision:old?.revision??null,...(replacing?{replacesRequestId:existing.requestId}:{})});
     onBegin();
     controller?.abort();controller=new AbortController();const epoch=++generation;
