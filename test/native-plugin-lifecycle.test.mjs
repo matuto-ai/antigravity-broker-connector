@@ -7,13 +7,14 @@ import { randomUUID } from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import { NativeBinding } from '../src/native-binding.mjs';
 import { openInstallation } from '../src/installation.mjs';
-import { serveNativePlugin, approvalWaiterCommand, waiterCommand } from '../src/native-plugin.mjs';
+import { serveNativePlugin, approvalWaiterCommand, waiterCommand, DIRECT_COMMAND_GUIDANCE } from '../src/native-plugin.mjs';
+import { LocalError } from '../vendor/psst/reference/errors.mjs';
 import { PEER_GUIDANCE } from '../src/native-waiter.mjs';
 
 const nativeMeta = id => ({ 'antigravity.google/root_conversation_id': id, 'antigravity.google/conversation_id': id });
 const barrier = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 
-async function fixture(t, { failure, selected = true, approvalApi } = {}) {
+async function fixture(t, { failure, selected = true, approvalApi, tools = {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'native-owner-unit-'));
   let server;
   t.after(async () => { await server?.close(); rmSync(root, { recursive: true, force: true }); });
@@ -41,7 +42,7 @@ async function fixture(t, { failure, selected = true, approvalApi } = {}) {
       calls.push(options); await failure?.(calls.length, options);
       const id = identities.get(options.conversationId) ?? randomUUID(); identities.set(options.conversationId, id);
       const session = { identity: { client_id: id }, inbox: { directory: join(root, 'inbox-' + options.conversationId) },
-        tools: { broker_identity: async () => ({ client_id: id }) }, closes: [],
+        tools: { broker_identity: async () => ({ client_id: id }), ...tools }, closes: [],
         async close(options) { this.closes.push(options); } };
       sessions.push(session); return session;
     },
@@ -60,10 +61,55 @@ test('native MCP initialization delivers collaboration guidance without enrollin
   } }) + '\n');
   const { result } = await response;
   assert.ok(result.instructions.includes(PEER_GUIDANCE));
+  assert.ok(result.instructions.includes(DIRECT_COMMAND_GUIDANCE));
   assert.match(result.instructions, /For a transport notice, read broker_presence_events/);
   assert.equal(f.server.binding.assertHost().conversation, null);
   assert.equal(f.installation.pending(), null);
   assert.equal(f.calls.length, 0);
+});
+
+test('ordinary native MCP commands validate then dispatch once, retaining failure and saved-state guarantees', async t => {
+  const sent = [];
+  const f = await fixture(t, { tools: { broker_send: async args => {
+    sent.push(args);
+    if (args.text === 'network failure') throw new LocalError('request_failed', { effect: 'unknown' });
+    return { status: 'accepted', message_id: randomUUID() };
+  } } });
+  const conversationId = randomUUID();
+  await f.call(conversationId);
+  const selected = f.installation.selected(), pending = f.installation.pending();
+  let rpcId = 0;
+  const rpc = (method, params) => {
+    const response = new Promise(resolve => f.output.once('data', bytes => resolve(JSON.parse(bytes.toString()))));
+    f.input.write(JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }) + '\n');
+    return response;
+  };
+  await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fixture', version: '1' } });
+  f.input.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+  const call = (name, args) => rpc('tools/call', { name, arguments: f.server.binding.issue({
+    context: { host: f.host, conversationId }, tool: name, args,
+  }), _meta: nativeMeta(conversationId) });
+  const recipient_id = randomUUID();
+  for (const args of [{ text: 'missing recipient' }, { recipient_id }, { recipient_id: 'not-a-uuid', text: 'invalid' }]) {
+    assert.equal((await call('broker_send', args)).error.code, -32602);
+  }
+  const unavailable = await rpc('tools/call', { name: 'broker_nonexistent', arguments: {} });
+  assert.equal(unavailable.error.code, -32602);
+  assert.equal(sent.length, 0);
+  const args = { recipient_id, text: 'hello' };
+  const result = await call('broker_send', args);
+  assert.equal(result.result.isError, false);
+  assert.deepEqual(sent, [args]);
+  const failed = await call('broker_send', { recipient_id, text: 'network failure' });
+  assert.equal(failed.result.isError, true);
+  const error = JSON.parse(failed.result.content[0].text).error;
+  assert.equal(error.code, 'request_failed');
+  assert.equal(error.effect, 'unknown');
+  assert.match(error.action, /Retry only the original idempotent operation/);
+  assert.equal(sent.length, 2);
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.installation.selected(), selected);
+  assert.deepEqual(f.installation.pending(), pending);
 });
 
 test('saved installation reconnects after transient startup failure without enrollment or a new identity', async t => {
