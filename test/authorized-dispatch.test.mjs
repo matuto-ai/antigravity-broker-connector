@@ -19,7 +19,7 @@ const fixtures = [
   ['independent judgment and task continuity', PEER_GUIDANCE, /Resolve discoverable facts and low-risk reversible choices independently/, /only when consequential uncertainty/, /without automatically stopping or silently abandoning or delaying the human task/],
   ['native denial', DIRECT_COMMAND_GUIDANCE, /after a native denial stop/, /without reload\/reconnect loops, alternate servers/],
   ['uncertain send', PEER_GUIDANCE, /Inspect broker_sent_history and broker_message_status after an uncertain send before any fresh send/, /new invocation can duplicate delivery/],
-  ['read ACK and bounded response', PEER_GUIDANCE, /read the full body, explicitly ACK/, /ACK means reading, not response delivery/, /send acceptance means broker storage/, /Do not intentionally repeat an already-handled response or action/, /reply to mere acknowledgments or require a reply to every informational message/],
+  ['read ACK and bounded response', PEER_GUIDANCE, /read the full body, explicitly ACK/, /ACK means reading, not response delivery/, /send acceptance means broker storage/, /Do not automatically answer every message indefinitely/, /Do not intentionally repeat an already-handled response or action/, /reply to mere acknowledgments or require a reply to every informational message/],
 ];
 for (const [name, guidance, ...requirements] of fixtures) {
   test('model guidance fixture: ' + name, () => {
