@@ -88,6 +88,18 @@ connection is still active, so its completion can re-arm the new inbox.
 
 ## Ordinary commands
 
+| Command | Purpose |
+| --- | --- |
+| `/psst-setup <https://broker.example>` | Initial URL-only setup and administrator approval. |
+| `/psst-connect` | Reconnect this conversation using saved authorization; no arguments or enrollment. Already connected is a no-op. |
+| `/psst-disconnect` | Stop this conversation's transport, waiter and pending setup resumption; preserve saved authorization and unread messages. |
+| `/psst-reauthorize <https://broker.example>` | Explicit replacement authorization at the required endpoint; not reconnect or revocation. |
+| `/psst` | Recipient discovery and messaging. |
+
+Connect calls `broker_connect` with no arguments on `psst-native_psst`, then arms the returned waiter with native `run_command`, `WaitMsBeforeAsync=500`. Missing saved authorization directs you to setup; invalid, expired or revoked authorization stops for attention without enrollment or automatic replacement. Explicit legacy `connection_file` or `pairing_file` tool arguments remain supported; file contents stay private. Disconnect calls `broker_disconnect` with no arguments and does not re-arm a waiter. It remains in force across reload for this conversation until explicit connect or setup, without disabling other conversations.
+
+Both commands are packaged prompt-based skills, not token-free native callbacks. They retain the native permission and one-use conversation-binding checks.
+
 Explicit setup and messaging commands execute through the supported native tools without another execution question or preventive diagnostics. The native server supplies shared command guidance; skills first check only the required inputs and capabilities. Setup needs `broker_setup` on `psst-native_psst` and native `run_command` for its waiter; `broker_setup_status` is needed only when no URL was supplied. A supplied invalid broker origin returns usage before tool calls. Messaging checks its requested tool and required arguments, using supplied exact recipient IDs or normal recipient discovery. Missing input gets one focused question; missing capability gets its name and the next step to enable the native plugin/tool, then stops.
 
 Only a failed operation triggers bounded supported recovery. A blocker or native denial ends the attempt with its cause and next step, not model reload/reconnect loops, alternate brokers, permission changes or state/lock deletion. Saved authorization reconnect and waiter-based delivery remain unchanged; connection failures and peer messages never request replacement authorization. Native permissions, required access confirmations and broker-administrator approval remain in force. These are prompt-based skills, not deterministic pre-model dispatch; reauthorization follows its separate [explicit replacement](#explicit-replacement-authorization) flow.
@@ -131,7 +143,7 @@ transient host bindings. No custom `agy` wrapper or policy adapter is required
 by this connector. These are documented paths, not an inspection of the user's
 current mounts; recreate-container validation is deferred to the user's machine.
 
-`broker_disconnect` stops this host's transport and locally cancels pending setup
+`/psst-disconnect` (`broker_disconnect`) stops this host's transport and locally cancels pending setup
 resumption; `broker_cancel_setup` leaves existing approved transport intact.
 Neither revokes server authorization. Admin UI revocation is separate. Pending
 messages are retained; broker presence can remain until lease expiry.
